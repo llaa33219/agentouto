@@ -307,8 +307,8 @@ agnetouto/
 | **2** | Single agent execution: agent loop + tool calling | ✅ Done |
 | **3** | Multi-agent: call_agent + finish + message routing | ✅ Done |
 | **4** | Parallel calls: asyncio.gather concurrent execution | ✅ Done |
-| **5** | Streaming, logging, debug tools | 🔲 Not started |
-| **6** | PyPI publish + documentation | 🔲 Not started |
+| **5** | Streaming, logging, tracing, debug mode | ✅ Done |
+| **6** | CI/CD, tests, PyPI publish | 🔶 Partial (CI/CD + tests done, PyPI pending) |
 
 ---
 

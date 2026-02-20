@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -75,6 +76,83 @@ class OpenAIBackend(ProviderBackend):
                 )
 
         return LLMResponse(content=msg.content, tool_calls=parsed_calls)
+
+    async def stream(
+        self,
+        context: Context,
+        tools: list[dict[str, Any]],
+        agent: Agent,
+        provider: Provider,
+    ) -> AsyncIterator[str | LLMResponse]:
+        client = self._get_client(provider)
+
+        messages = _build_messages(context)
+        openai_tools = _build_tools(tools)
+
+        params: dict[str, Any] = {
+            "model": agent.model,
+            "messages": messages,
+            "max_completion_tokens": agent.max_output_tokens,
+            "stream": True,
+            **agent.extra,
+        }
+        if openai_tools:
+            params["tools"] = openai_tools
+        if agent.reasoning:
+            params["reasoning_effort"] = agent.reasoning_effort
+        else:
+            params["temperature"] = agent.temperature
+
+        try:
+            response_stream = await client.chat.completions.create(**params)
+        except Exception as exc:
+            raise ProviderError(provider.name, str(exc)) from exc
+
+        accumulated_content = ""
+        accumulated_tool_calls: dict[int, dict[str, str]] = {}
+
+        async for chunk in response_stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+
+            if delta.content:
+                accumulated_content += delta.content
+                yield delta.content
+
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in accumulated_tool_calls:
+                        accumulated_tool_calls[idx] = {
+                            "id": "",
+                            "name": "",
+                            "arguments": "",
+                        }
+                    if tc_delta.id:
+                        accumulated_tool_calls[idx]["id"] = tc_delta.id
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            accumulated_tool_calls[idx]["name"] = tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            accumulated_tool_calls[idx]["arguments"] += (
+                                tc_delta.function.arguments
+                            )
+
+        parsed_calls: list[ToolCall] = []
+        for idx in sorted(accumulated_tool_calls):
+            tc = accumulated_tool_calls[idx]
+            try:
+                arguments = json.loads(tc["arguments"])
+            except (json.JSONDecodeError, TypeError):
+                arguments = {"raw": tc["arguments"]}
+            parsed_calls.append(
+                ToolCall(id=tc["id"], name=tc["name"], arguments=arguments)
+            )
+
+        yield LLMResponse(
+            content=accumulated_content or None, tool_calls=parsed_calls
+        )
 
 
 def _build_messages(context: Context) -> list[dict[str, Any]]:

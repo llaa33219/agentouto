@@ -8,9 +8,9 @@
 
 ## 1. 현재 상태
 
-**버전:** 0.1.0 (개발 중, 미공개)
+**버전:** 0.2.0 (개발 중, 미공개)
 
-**최종 업데이트:** 초기 구현 완료
+**최종 업데이트:** Phase 5 + Phase 6 (부분) 완료
 
 ---
 
@@ -61,25 +61,26 @@
 - [x] `async_run()` 비동기 진입점
 - [x] `_constants.py` — 공유 상수
 
+### Phase 5: 스트리밍, 로그, 디버그 ✅
+
+- [x] 스트리밍 응답 — `async_run_stream()` + `StreamEvent` + OpenAI 네이티브 스트리밍
+- [x] 로깅 시스템 — `EventLog` + `AgentEvent` (구조화된 이벤트 기록)
+- [x] `Message` 객체 실제 생성/추적 — 런타임에서 전달/반환 Message 생성, `RunResult.messages`로 제공
+- [x] 호출 트레이싱 — `Trace` + `Span` (call_id/parent_call_id 기반 트리 구조)
+- [x] 디버그 모드 — `debug=True` 파라미터, Python `logging` 모듈 연동
+
+### Phase 6: 배포 + 문서 (부분 완료) 🔶
+
+- [x] CI/CD 설정 — GitHub Actions (CI: test + mypy, CD: PyPI Trusted Publisher)
+- [x] 테스트 작성 — 61개 테스트 (pytest + pytest-asyncio, MockBackend 기반)
+- [x] GitHub 레포 공개 — `llaa33219/agnetouto`
+- [ ] PyPI 공개 — Trusted Publisher 설정 후 릴리스 시 자동 배포
+- [ ] 사용자 문서 (예제 중심)
+- [ ] API 레퍼런스 문서 자동 생성
+
 ---
 
 ## 3. 미구현 기능
-
-### Phase 5: 스트리밍, 로그, 디버그 🔲
-
-- [ ] 스트리밍 응답 — LLM 응답을 실시간으로 전달
-- [ ] 로깅 시스템 — 에이전트 루프 이벤트 기록
-- [ ] `Message` 객체 실제 생성/추적 — 현재는 문자열만 전달
-- [ ] 호출 트레이싱 — 에이전트 호출 체인 시각화
-- [ ] 디버그 모드 — 상세 실행 로그
-
-### Phase 6: 배포 + 문서 🔲
-
-- [ ] PyPI 공개
-- [ ] 사용자 문서 (예제 중심)
-- [ ] API 레퍼런스 문서 자동 생성
-- [ ] CI/CD 설정
-- [ ] 테스트 작성
 
 ### 추가 고려 사항
 
@@ -97,13 +98,27 @@
 | 문제 | 심각도 | 설명 |
 |------|--------|------|
 | Google 전역 설정 충돌 | 중간 | `genai.configure()`가 전역이므로 여러 Google Provider 동시 사용 시 충돌 가능 |
-| Message 클래스 미사용 | 낮음 | 정의되어 있지만 런타임에서 실제 생성되지 않음 |
 | 무한 루프 방지 없음 | 낮음 (설계 의도) | 시스템 레벨 제한 없음. instructions로만 제어. 철학적 결정. |
-| 테스트 없음 | 높음 | 단위 테스트, 통합 테스트 미작성 |
+| 스트리밍은 OpenAI만 네이티브 | 낮음 | Anthropic, Google은 fallback (non-streaming 후 단일 이벤트) |
+| PyPI 미공개 | 중간 | Trusted Publisher 설정 및 첫 릴리스 필요 |
 
 ---
 
 ## 5. 변경 이력
+
+### 0.2.0
+
+- Phase 5 완료: 스트리밍, 로깅, 메시지 추적, 호출 트레이싱, 디버그 모드
+- Phase 6 부분 완료: GitHub repo, CI/CD, 61개 테스트
+- 새 모듈: `event_log.py`, `tracing.py`, `streaming.py`
+- 새 공개 API: `EventLog`, `AgentEvent`, `Trace`, `Span`, `StreamEvent`, `async_run_stream`
+- `RunResult` 확장: `messages`, `trace`, `event_log` 필드 추가, `format_trace()` 메서드
+- `run()`/`async_run()`에 keyword-only `debug` 파라미터 추가
+- `EventLog.filter(agent_name, event_type)` 메서드 추가
+- OpenAI 백엔드에 네이티브 스트리밍 구현
+- `ProviderBackend`에 `stream()` 기본 구현 (fallback) 추가
+- `Router.stream_llm()` 메서드 추가
+- Apache License 2.0 적용
 
 ### 0.1.0 (초기 구현)
 

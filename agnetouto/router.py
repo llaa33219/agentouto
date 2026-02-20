@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from agnetouto._constants import CALL_AGENT, FINISH
@@ -123,3 +124,13 @@ class Router:
             raise ProviderError(agent.provider, "Provider not found")
         backend = self._get_backend(provider.kind)
         return await backend.call(context, tool_schemas, agent, provider)
+
+    async def stream_llm(
+        self, agent: Agent, context: Context, tool_schemas: list[dict[str, Any]]
+    ) -> AsyncIterator[str | LLMResponse]:
+        provider = self._providers.get(agent.provider)
+        if provider is None:
+            raise ProviderError(agent.provider, "Provider not found")
+        backend = self._get_backend(provider.kind)
+        async for chunk in backend.stream(context, tool_schemas, agent, provider):
+            yield chunk

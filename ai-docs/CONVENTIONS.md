@@ -223,18 +223,103 @@ class Router:
 
 ### 도구
 
-- `pytest` + `pytest-asyncio`
+- `pytest` + `pytest-asyncio` (asyncio_mode = `auto`)
 - `mypy` 타입 체크
+- `unittest.mock` — `patch`, `MagicMock`
 
-### 아직 구현되지 않은 것
+### 테스트 파일 구조
 
-- 테스트 파일 구조 (추후 결정)
-- CI/CD 설정
-- 코드 포매터 / 린터 설정
+```
+tests/
+├── __init__.py
+├── conftest.py          # 공유 fixture
+├── test_core.py         # Message, Agent, Provider, Tool, Context 단위 테스트
+├── test_router.py       # Router 단위 테스트
+├── test_event_log.py    # EventLog, Trace, Span 단위 테스트
+└── test_runtime.py      # Runtime 통합 테스트 (MockBackend 기반)
+```
+
+### MockBackend 패턴
+
+LLM 호출을 모킹하기 위해 `ProviderBackend`를 상속한 `MockBackend`를 사용한다:
+
+```python
+class MockBackend(ProviderBackend):
+    def __init__(self, responses: list[LLMResponse]) -> None:
+        self._responses = list(responses)
+        self._call_count = 0
+
+    async def call(self, context, tools, agent, provider) -> LLMResponse:
+        response = self._responses[self._call_count]
+        self._call_count += 1
+        return response
+```
+
+`get_backend`를 패치하여 MockBackend를 주입한다:
+
+```python
+with patch("agnetouto.router.get_backend", return_value=mock):
+    result = await async_run(...)
+```
+
+패치 위치는 `agnetouto.router.get_backend` (사용하는 쪽에서 패치).
+
+### 헬퍼 함수
+
+테스트에서 자주 사용하는 LLMResponse 생성 헬퍼:
+
+```python
+def _finish(message: str) -> LLMResponse          # finish 도구 호출
+def _text(content: str) -> LLMResponse              # 텍스트 응답
+def _tool_call(tool_name, tool_id, **kwargs)         # 도구 호출
+def _call_agent(agent_name, message)                 # 에이전트 호출
+```
 
 ---
 
-## 11. 금지 사항
+## 11. CI/CD
+
+### GitHub Actions
+
+```
+.github/workflows/
+├── ci.yml       # push/PR시: pytest + mypy (Python 3.11, 3.12, 3.13)
+└── publish.yml  # release 생성시: PyPI Trusted Publisher로 자동 배포
+```
+
+- CI: `pip install -e '.[dev]'` → `pytest tests/ -v` → `mypy agnetouto/`
+- CD: `python -m build` → `pypa/gh-action-pypi-publish` (OIDC, 토큰 불필요)
+
+---
+
+## 12. Keyword-only 파라미터
+
+선택적 파라미터는 keyword-only로 강제한다:
+
+```python
+# ✅ Good
+async def async_run(
+    entry: Agent,
+    message: str,
+    agents: list[Agent],
+    tools: list[Tool],
+    providers: list[Provider],
+    *,
+    debug: bool = False,
+) -> RunResult:
+
+# ❌ Bad
+async def async_run(
+    ...,
+    debug: bool = False,  # positional로 호출 가능 — 불안전
+) -> RunResult:
+```
+
+`*` 뒤의 파라미터는 반드시 `debug=True` 형식으로 전달해야 한다.
+
+---
+
+## 13. 금지 사항
 
 | 하지 마라 | 이유 |
 |----------|------|

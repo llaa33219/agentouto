@@ -1,0 +1,370 @@
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import patch
+
+import pytest
+
+from agnetouto.agent import Agent
+from agnetouto.context import Context, ToolCall
+from agnetouto.provider import Provider
+from agnetouto.providers import LLMResponse, ProviderBackend
+from agnetouto.runtime import RunResult, async_run
+from agnetouto.tool import Tool
+
+
+class MockBackend(ProviderBackend):
+    """Returns pre-configured LLMResponse objects in order."""
+
+    def __init__(self, responses: list[LLMResponse]) -> None:
+        self._responses = list(responses)
+        self._call_count = 0
+
+    async def call(
+        self,
+        context: Context,
+        tools: list[dict[str, Any]],
+        agent: Agent,
+        provider: Provider,
+    ) -> LLMResponse:
+        assert self._call_count < len(self._responses), (
+            f"MockBackend exhausted: {self._call_count} calls made, "
+            f"only {len(self._responses)} responses configured"
+        )
+        response = self._responses[self._call_count]
+        self._call_count += 1
+        return response
+
+
+def _finish(message: str) -> LLMResponse:
+    return LLMResponse(
+        content=None,
+        tool_calls=[ToolCall(id="fin_1", name="finish", arguments={"message": message})],
+    )
+
+
+def _text(content: str) -> LLMResponse:
+    return LLMResponse(content=content, tool_calls=[])
+
+
+def _tool_call(tool_name: str, tool_id: str, **kwargs: str) -> LLMResponse:
+    return LLMResponse(
+        content=None,
+        tool_calls=[ToolCall(id=tool_id, name=tool_name, arguments=dict(kwargs))],
+    )
+
+
+def _call_agent(agent_name: str, message: str) -> LLMResponse:
+    return LLMResponse(
+        content=None,
+        tool_calls=[
+            ToolCall(
+                id="ca_1",
+                name="call_agent",
+                arguments={"agent_name": agent_name, "message": message},
+            )
+        ],
+    )
+
+
+def _multi_tool_calls(*calls: tuple[str, str, dict[str, str]]) -> LLMResponse:
+    tool_calls = [
+        ToolCall(id=tc_id, name=name, arguments=args)
+        for name, tc_id, args in calls
+    ]
+    return LLMResponse(content=None, tool_calls=tool_calls)
+
+
+# --- Fixtures ---
+
+
+@pytest.fixture
+def provider() -> Provider:
+    return Provider(name="openai", kind="openai", api_key="sk-test")
+
+
+@pytest.fixture
+def agent_a() -> Agent:
+    return Agent(name="agent_a", instructions="Agent A.", model="gpt-4o", provider="openai")
+
+
+@pytest.fixture
+def agent_b() -> Agent:
+    return Agent(name="agent_b", instructions="Agent B.", model="gpt-4o", provider="openai")
+
+
+@pytest.fixture
+def search_tool() -> Tool:
+    @Tool
+    def search(query: str) -> str:
+        """Search the web."""
+        return f"Results for: {query}"
+    return search
+
+
+@pytest.fixture
+def upper_tool() -> Tool:
+    @Tool
+    def uppercase(text: str) -> str:
+        """Convert to uppercase."""
+        return text.upper()
+    return uppercase
+
+
+# --- Tests ---
+
+
+class TestSingleAgentTextResponse:
+    @pytest.mark.asyncio
+    async def test_llm_returns_text(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([_text("Hello from LLM")])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Say hello",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "Hello from LLM"
+
+
+class TestSingleAgentFinish:
+    @pytest.mark.asyncio
+    async def test_llm_calls_finish(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([_finish("Final answer")])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Give me the answer",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "Final answer"
+
+
+class TestSingleAgentToolCall:
+    @pytest.mark.asyncio
+    async def test_tool_call_then_finish(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([
+            _tool_call("search", "tc1", query="AI trends"),
+            _finish("Based on search: AI is trending"),
+        ])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Search for AI trends",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "Based on search: AI is trending"
+        assert mock._call_count == 2
+
+
+class TestMultiAgent:
+    @pytest.mark.asyncio
+    async def test_agent_calls_agent(
+        self,
+        agent_a: Agent,
+        agent_b: Agent,
+        provider: Provider,
+        search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([
+            _call_agent("agent_b", "Please help me"),
+            _finish("I helped you"),
+            _finish("Done with help from B"),
+        ])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Do something complex",
+                agents=[agent_a, agent_b],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "Done with help from B"
+        assert mock._call_count == 3
+
+
+class TestDebugMode:
+    @pytest.mark.asyncio
+    async def test_debug_populates_messages(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([_finish("debug result")])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Test debug",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+                debug=True,
+            )
+        assert result.output == "debug result"
+        assert len(result.messages) >= 2
+        forward_msgs = [m for m in result.messages if m.type == "forward"]
+        return_msgs = [m for m in result.messages if m.type == "return"]
+        assert len(forward_msgs) >= 1
+        assert len(return_msgs) >= 1
+        assert forward_msgs[0].sender == "user"
+        assert forward_msgs[0].receiver == "agent_a"
+        assert return_msgs[-1].sender == "agent_a"
+        assert return_msgs[-1].receiver == "user"
+
+    @pytest.mark.asyncio
+    async def test_debug_populates_event_log(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([_finish("result")])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Test",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+                debug=True,
+            )
+        assert result.event_log is not None
+        assert len(result.event_log) > 0
+        event_types = [e.event_type for e in result.event_log]
+        assert "agent_call" in event_types
+        assert "llm_call" in event_types
+
+    @pytest.mark.asyncio
+    async def test_debug_populates_trace(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([_finish("traced")])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Trace me",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+                debug=True,
+            )
+        assert result.trace is not None
+        assert result.trace.root is not None
+        assert result.trace.root.agent_name == "agent_a"
+
+    @pytest.mark.asyncio
+    async def test_format_trace(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([_finish("traced")])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Trace me",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+                debug=True,
+            )
+        tree = result.format_trace()
+        assert "agent_a" in tree
+
+    @pytest.mark.asyncio
+    async def test_format_trace_without_debug(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([_finish("no debug")])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="No debug",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert "no trace" in result.format_trace()
+
+
+class TestDebugMultiAgent:
+    @pytest.mark.asyncio
+    async def test_multi_agent_messages(
+        self,
+        agent_a: Agent,
+        agent_b: Agent,
+        provider: Provider,
+        search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([
+            _call_agent("agent_b", "Help"),
+            _finish("Helped"),
+            _finish("All done"),
+        ])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Start",
+                agents=[agent_a, agent_b],
+                tools=[search_tool],
+                providers=[provider],
+                debug=True,
+            )
+        assert result.output == "All done"
+        assert result.event_log is not None
+        agent_calls = result.event_log.filter(event_type="agent_call")
+        assert len(agent_calls) >= 2
+        assert result.trace is not None
+        assert len(result.trace.root.children) >= 1
+
+
+class TestParallelToolCalls:
+    @pytest.mark.asyncio
+    async def test_multiple_tools_in_one_response(
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
+        upper_tool: Tool,
+    ) -> None:
+        mock = MockBackend([
+            _multi_tool_calls(
+                ("search", "tc1", {"query": "hello"}),
+                ("uppercase", "tc2", {"text": "world"}),
+            ),
+            _finish("Got both results"),
+        ])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Do two things",
+                agents=[agent_a],
+                tools=[search_tool, upper_tool],
+                providers=[provider],
+            )
+        assert result.output == "Got both results"
+        assert mock._call_count == 2
+
+
+class TestMessagesAlwaysPopulated:
+    @pytest.mark.asyncio
+    async def test_messages_without_debug(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([_finish("result")])
+        with patch("agnetouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Hello",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert len(result.messages) >= 2
+        assert result.messages[0].type == "forward"
+        assert result.messages[-1].type == "return"

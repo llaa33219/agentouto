@@ -12,15 +12,18 @@ agnetouto/
 ├── _constants.py        # 내부 상수 (CALL_AGENT, FINISH)
 ├── agent.py             # Agent 데이터클래스
 ├── context.py           # 에이전트별 대화 컨텍스트 관리
+├── event_log.py         # 구조화된 이벤트 로깅 (AgentEvent, EventLog)
 ├── exceptions.py        # 커스텀 예외 계층
 ├── message.py           # Message 데이터클래스
 ├── provider.py          # Provider 데이터클래스
 ├── router.py            # 메시지 라우팅, 시스템 프롬프트, 도구 스키마
-├── runtime.py           # 에이전트 루프 엔진, 병렬 실행, run()/async_run()
+├── runtime.py           # 에이전트 루프 엔진, 병렬 실행, 스트리밍, run()/async_run()
+├── streaming.py         # 스트리밍 인터페이스 (StreamEvent, async_run_stream)
 ├── tool.py              # Tool 데코레이터/클래스
+├── tracing.py           # 호출 트레이싱 (Span, Trace)
 └── providers/
     ├── __init__.py      # ProviderBackend ABC, LLMResponse, get_backend()
-    ├── openai.py        # OpenAI 구현
+    ├── openai.py        # OpenAI 구현 (스트리밍 포함)
     ├── anthropic.py     # Anthropic 구현
     └── google.py        # Google Gemini 구현
 ```
@@ -37,9 +40,15 @@ agnetouto/
 | `Tool` | class | 도구 데코레이터/클래스 |
 | `Provider` | dataclass | 프로바이더 (API 접속 정보) |
 | `Message` | dataclass | 전달/반환 메시지 |
-| `RunResult` | dataclass | 실행 결과 컨테이너 |
+| `RunResult` | dataclass | 실행 결과 컨테이너 (output, messages, trace, event_log) |
 | `run()` | function | 동기 실행 진입점 |
 | `async_run()` | async function | 비동기 실행 진입점 |
+| `async_run_stream()` | async generator | 스트리밍 실행 진입점 (StreamEvent 생성) |
+| `EventLog` | class | 구조화된 이벤트 로그 컨테이너 |
+| `AgentEvent` | dataclass | 개별 이벤트 레코드 |
+| `Trace` | class | 호출 트리 빌더 |
+| `Span` | dataclass | 트레이스 트리의 노드 |
+| `StreamEvent` | dataclass | 스트리밍 이벤트 |
 
 ---
 
@@ -89,7 +98,7 @@ class Message:
     call_id: str  # uuid4 자동 생성
 ```
 
-현재 런타임 내부에서 `Message`를 직접 생성/전달하지는 않는다 (런타임은 content 문자열을 직접 전달). 추후 로깅/트레이싱에서 사용될 예정.
+런타임이 매 에이전트 호출/반환 시점에 Message 객체를 생성하여 `RunResult.messages`에 수집한다.
 
 ### `tool.py` — Tool
 
@@ -165,29 +174,61 @@ class Router:
 
 ```python
 class Runtime:
-    async def execute(agent, forward_message) -> str
-    async def _run_agent_loop(agent, forward_message) -> str
-    async def _execute_tool_call(tc) -> str
+    def __init__(router, debug=False)
+    async def execute(agent, forward_message) -> RunResult
+    async def _run_agent_loop(agent, forward_message, call_id, parent_call_id) -> str
+    async def _execute_tool_call(tc, caller_name, caller_call_id) -> str
+    async def execute_stream(agent, forward_message) -> AsyncIterator[StreamEvent]
+    async def _stream_agent_loop(agent, forward_message, call_id, parent_call_id) -> AsyncIterator[StreamEvent]
 ```
+
+**디버그 모드:**
+- `debug=True` 시 `EventLog` 인스턴스를 생성하여 모든 이벤트를 기록
+- 실행 종료 시 `Trace` 빌드 후 `RunResult`에 포함
+- Python `logging` 모듈로 `agnetouto` 로거에 디버그 로그 출력
+- `debug=False`일 때는 이벤트 기록을 건너뜀 (성능 영향 없음)
+
+**메시지 추적:**
+- 매 에이전트 호출/반환 시점에 `Message` 객체를 생성하여 `self._messages`에 수집
+- `debug=False`여도 메시지는 항상 수집됨
 
 **에이전트 루프 (`_run_agent_loop`):**
 1. 시스템 프롬프트 생성 → Context 초기화
 2. forward_message를 user 메시지로 추가
 3. 무한 루프:
-   a. LLM 호출
+   a. LLM 호출 (이벤트 기록: `llm_call`, `llm_response`)
    b. tool_calls가 없으면 → 텍스트 응답 반환
-   c. `finish` 호출이 있으면 → message 반환
-   d. tool_calls를 `asyncio.gather`로 병렬 실행
+   c. `finish` 호출이 있으면 → message 반환 (이벤트 기록: `finish`)
+   d. tool_calls를 `asyncio.gather`로 병렬 실행 (이벤트 기록: `tool_exec`, `agent_call`)
    e. 결과(또는 에러)를 tool result로 추가
    f. 다음 반복
 
 **도구 실행 (`_execute_tool_call`):**
-- `call_agent` → 대상 에이전트의 `_run_agent_loop` 재귀 호출
+- `call_agent` → 대상 에이전트의 `_run_agent_loop` 재귀 호출 (sub_call_id 생성, Message 추적)
 - 일반 도구 → `tool.execute(**kwargs)` 실행, 에러 시 `ToolError` 래핑
+
+**스트리밍 (`execute_stream` / `_stream_agent_loop`):**
+- `Router.stream_llm()`을 통해 LLM 스트리밍 호출
+- 텍스트 청크는 `StreamEvent(type="token")`로 즐시 yield
+- 도구 호출, 에이전트 호출, 완료도 각각 StreamEvent로 yield
+- 내부 에이전트 호출은 재귀적으로 sub-stream 생성
 
 **`run()` / `async_run()`:**
 - Router 생성 → Runtime 생성 → execute 호출 → RunResult 반환
 - `run()`은 `asyncio.run(async_run(...))` 래퍼
+- `debug` 파라미터는 keyword-only (`*, debug: bool = False`)
+
+**`RunResult`:**
+```python
+@dataclass
+class RunResult:
+    output: str                          # 에이전트의 반환 메시지
+    messages: list[Message]              # 모든 전달/반환 메시지 (항상 수집)
+    trace: Trace | None                  # 호출 트리 (debug=True일 때만)
+    event_log: EventLog | None           # 이벤트 로그 (debug=True일 때만)
+
+    def format_trace() -> str            # trace.print_tree() 편의 메서드
+```
 
 ### `_constants.py`
 
@@ -208,6 +249,73 @@ AgentOutOError (base)
 └── RoutingError(message)
 ```
 
+### `event_log.py` — EventLog
+
+구조화된 이벤트 로깅 시스템.
+
+```python
+EventType = Literal["llm_call", "llm_response", "tool_exec", "agent_call", "agent_return", "finish", "error"]
+
+@dataclass
+class AgentEvent:
+    event_type: EventType
+    agent_name: str
+    call_id: str
+    parent_call_id: str | None
+    timestamp: float           # time.time() 자동 생성
+    details: dict[str, Any]    # 이벤트별 추가 데이터
+
+class EventLog:
+    def record(event)
+    def events -> list[AgentEvent]   # 복사본 반환
+    def filter(agent_name=None, event_type=None) -> list[AgentEvent]
+    def format() -> str              # 사람이 읽을 수 있는 포맷
+    def __iter__ / __len__
+```
+
+`Runtime._record()` 메서드가 디버그 모드일 때만 이벤트를 기록한다.
+
+### `tracing.py` — Trace
+
+호출 체인 트리 구축.
+
+```python
+@dataclass
+class Span:
+    agent_name: str
+    call_id: str
+    parent_call_id: str | None
+    start_time: float
+    end_time: float
+    children: list[Span]
+    tool_calls: list[dict[str, Any]]
+    result: str | None
+    duration -> float          # property
+
+class Trace:
+    def __init__(event_log: EventLog)   # EventLog에서 트리 자동 구축
+    def root -> Span | None
+    def print_tree() -> str             # ASCII 트리 시각화
+```
+
+`Trace`는 `EventLog`의 `call_id`/`parent_call_id` 관계로 트리를 빌드한다.
+
+### `streaming.py` — Streaming
+
+스트리밍 인터페이스.
+
+```python
+@dataclass
+class StreamEvent:
+    type: Literal["token", "tool_call", "agent_call", "agent_return", "finish", "error"]
+    agent_name: str
+    data: dict[str, Any]
+
+async def async_run_stream(entry, message, agents, tools, providers) -> AsyncIterator[StreamEvent]
+```
+
+`async_run_stream()`은 `Runtime.execute_stream()`을 랩한다.
+
 ### `providers/__init__.py`
 
 ```python
@@ -217,6 +325,9 @@ class LLMResponse:
 
 class ProviderBackend(ABC):
     async def call(context, tools, agent, provider) -> LLMResponse
+    async def stream(context, tools, agent, provider) -> AsyncIterator[str | LLMResponse]
+        # 기본 구현: call() 호출 후 content + LLMResponse 순서대로 yield (fallback)
+        # OpenAI만 네이티브 스트리밍 구현 (str 청크를 실시간 yield)
 
 def get_backend(kind: str) -> ProviderBackend  # 팩토리 함수
 ```
@@ -299,11 +410,14 @@ Context (프로바이더 비의존)
 |------|----------|
 | `asyncio` | `runtime.py` — gather, run |
 | `json` | `providers/openai.py` — tool call 파싱 |
-| `uuid` | `message.py`, `providers/google.py` — ID 생성 |
+| `uuid` | `message.py`, `providers/google.py`, `runtime.py` — ID 생성 |
 | `inspect` | `tool.py` — 함수 시그니처 분석 |
 | `typing` | 전역 — 타입 힌팅 |
 | `dataclasses` | 데이터 클래스 정의 |
 | `abc` | `providers/__init__.py` — 추상 클래스 |
+| `logging` | `runtime.py` — 디버그 로그 |
+| `time` | `event_log.py` — 타임스탬프 |
+| `collections.abc` | `runtime.py`, `streaming.py`, `providers/` — AsyncIterator |
 
 ---
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -31,6 +32,19 @@ class ProviderBackend(ABC):
         agent: Agent,
         provider: Provider,
     ) -> LLMResponse: ...
+
+    async def stream(
+        self,
+        context: Context,
+        tools: list[dict[str, Any]],
+        agent: Agent,
+        provider: Provider,
+    ) -> AsyncIterator[str | LLMResponse]:
+        """Stream LLM response. Yields str for text chunks, then a final LLMResponse."""
+        response = await self.call(context, tools, agent, provider)
+        if response.content:
+            yield response.content
+        yield response
 
 
 def get_backend(kind: str) -> ProviderBackend:
