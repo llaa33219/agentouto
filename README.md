@@ -1,6 +1,10 @@
-# AgentOutO
+<p align="center">
+  <img src="logo.svg" alt="AgentOutO" width="600">
+</p>
 
-**A multi-agent Python SDK — peer-to-peer free calls with no orchestrator.**
+<h1 align="center">AgentOutO</h1>
+
+<p align="center"><strong>A multi-agent Python SDK — peer-to-peer free calls with no orchestrator.</strong></p>
 
 Every agent is equal. No orchestrator. No hierarchy. No restrictions.
 
@@ -46,8 +50,10 @@ Requires Python ≥ 3.11.
 ```python
 from agentouto import Agent, Tool, Provider, run
 
-# Provider — API connection info only
+# Providers — API connection info only
 openai = Provider(name="openai", kind="openai", api_key="sk-...")
+anthropic = Provider(name="anthropic", kind="anthropic", api_key="sk-ant-...")
+google = Provider(name="google", kind="google", api_key="AIza...")
 
 # Tool — globally available to all agents
 @Tool
@@ -59,24 +65,31 @@ def search_web(query: str) -> str:
 researcher = Agent(
     name="researcher",
     instructions="Research expert. Search and organize information.",
-    model="gpt-4o",
+    model="gpt-5.2",
     provider="openai",
 )
 
 writer = Agent(
     name="writer",
     instructions="Skilled writer. Turn research into polished reports.",
-    model="gpt-4o",
-    provider="openai",
+    model="claude-sonnet-4-6",
+    provider="anthropic",
+)
+
+reviewer = Agent(
+    name="reviewer",
+    instructions="Critical reviewer. Verify facts and improve quality.",
+    model="gemini-3.1-pro",
+    provider="google",
 )
 
 # Run — user is just an agent without an LLM
 result = run(
     entry=researcher,
     message="Write an AI trends report.",
-    agents=[researcher, writer],
+    agents=[researcher, writer, reviewer],
     tools=[search_web],
-    providers=[openai],
+    providers=[openai, anthropic, google],
 )
 
 print(result.output)
@@ -155,9 +168,9 @@ Providers hold API credentials. No model settings, no inference config.
 ```python
 from agentouto import Provider
 
-openai = Provider(name="openai", kind="openai", api_key="sk-...")
-anthropic = Provider(name="anthropic", kind="anthropic", api_key="sk-ant-...")
-google = Provider(name="google", kind="google", api_key="AIza...")
+openai = Provider(name="openai", kind="openai", api_key="sk-...")        # gpt-5.2, gpt-5.3-codex, o3, o4-mini
+anthropic = Provider(name="anthropic", kind="anthropic", api_key="sk-ant-...")  # claude-opus-4-6, claude-sonnet-4-6
+google = Provider(name="google", kind="google", api_key="AIza...")        # gemini-3.1-pro, gemini-3-flash
 
 # OpenAI-compatible APIs (vLLM, Ollama, LM Studio, etc.)
 local = Provider(name="local", kind="openai", base_url="http://localhost:11434/v1")
@@ -178,7 +191,7 @@ from agentouto import Agent
 agent = Agent(
     name="researcher",
     instructions="Research expert.",
-    model="gpt-4o",
+    model="gpt-5.2",
     provider="openai",
     max_output_tokens=16384,
     reasoning=True,
@@ -251,11 +264,11 @@ Two types. No exceptions.
 
 ## Supported Providers
 
-| Kind | Provider | Compatible With |
-|------|----------|-----------------|
-| `"openai"` | OpenAI API | vLLM, Ollama, LM Studio, any OpenAI-compatible API |
-| `"anthropic"` | Anthropic API | — |
-| `"google"` | Google Gemini API | — |
+| Kind | Provider | Example Models | Compatible With |
+|------|----------|----------------|-----------------|
+| `"openai"` | OpenAI API | `gpt-5.2`, `gpt-5.3-codex`, `o3`, `o4-mini` | vLLM, Ollama, LM Studio, any OpenAI-compatible API |
+| `"anthropic"` | Anthropic API | `claude-opus-4-6`, `claude-sonnet-4-6` | — |
+| `"google"` | Google Gemini API | `gemini-3.1-pro`, `gemini-3-flash` | — |
 
 ---
 
@@ -268,9 +281,9 @@ from agentouto import async_run
 result = await async_run(
     entry=researcher,
     message="Write an AI trends report.",
-    agents=[researcher, writer, reviewer],
+    agents=[researcher, writer, reviewer],  # Each agent can use any model/provider
     tools=[search_web, write_file],
-    providers=[openai, anthropic, google],
+    providers=[openai, anthropic, google],   # Mix providers freely
 )
 ```
 
