@@ -284,11 +284,11 @@ def _call_agent(agent_name, message)                 # 에이전트 호출
 ```
 .github/workflows/
 ├── ci.yml       # push/PR시: pytest + mypy (Python 3.11, 3.12, 3.13)
-└── publish.yml  # release 생성시: PyPI Trusted Publisher로 자동 배포
+└── publish.yml  # v* 태그 push시: PyPI Trusted Publisher로 자동 배포
 ```
 
 - CI: `pip install -e '.[dev]'` → `pytest tests/ -v` → `mypy agentouto/`
-- CD: `python -m build` → `pypa/gh-action-pypi-publish` (OIDC, 토큰 불필요)
+- CD: v* 태그 push → `python -m build` → `pypa/gh-action-pypi-publish` (OIDC, 토큰 불필요)
 
 ---
 

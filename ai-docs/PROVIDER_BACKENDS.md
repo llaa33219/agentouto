@@ -234,5 +234,5 @@ if agent.reasoning:
 ## 7. 알려진 제한사항
 
 1. **Google 전역 설정**: `genai.configure()`가 전역이므로 여러 Google Provider를 동시에 사용하면 충돌 가능.
-2. **스트리밍 미지원**: 현재 모든 백엔드가 non-streaming 호출만 지원.
+2. **스트리밍 부분 지원**: OpenAI 백엔드만 네이티브 스트리밍 구현. Anthropic, Google은 fallback (non-streaming 호출 후 단일 이벤트 반환).
 3. **비전/멀티모달 미지원**: 텍스트 기반 호출만 지원. 이미지 등의 멀티모달 입력은 미구현.

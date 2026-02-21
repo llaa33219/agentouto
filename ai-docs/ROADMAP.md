@@ -8,9 +8,9 @@
 
 ## 1. 현재 상태
 
-**버전:** 0.2.0 (개발 중, 미공개)
+**버전:** 0.2.0 (공개)
 
-**최종 업데이트:** Phase 5 + Phase 6 (부분) 완료
+**최종 업데이트:** Phase 5-6 완료, PyPI 공개
 
 ---
 
@@ -69,12 +69,12 @@
 - [x] 호출 트레이싱 — `Trace` + `Span` (call_id/parent_call_id 기반 트리 구조)
 - [x] 디버그 모드 — `debug=True` 파라미터, Python `logging` 모듈 연동
 
-### Phase 6: 배포 + 문서 (부분 완료) 🔶
+### Phase 6: 배포 + 문서 ✅
 
-- [x] CI/CD 설정 — GitHub Actions (CI: test + mypy, CD: PyPI Trusted Publisher)
+- [x] CI/CD 설정 — GitHub Actions (CI: test + mypy, CD: PyPI Trusted Publisher, v* 태그 push 트리거)
 - [x] 테스트 작성 — 61개 테스트 (pytest + pytest-asyncio, MockBackend 기반)
 - [x] GitHub 레포 공개 — `llaa33219/agentouto`
-- [ ] PyPI 공개 — Trusted Publisher 설정 후 릴리스 시 자동 배포
+- [x] PyPI 공개 — Trusted Publisher OIDC로 v0.2.0 배포 완료 (`pip install agentouto`)
 - [ ] 사용자 문서 (예제 중심)
 - [ ] API 레퍼런스 문서 자동 생성
 
@@ -100,7 +100,6 @@
 | Google 전역 설정 충돌 | 중간 | `genai.configure()`가 전역이므로 여러 Google Provider 동시 사용 시 충돌 가능 |
 | 무한 루프 방지 없음 | 낮음 (설계 의도) | 시스템 레벨 제한 없음. instructions로만 제어. 철학적 결정. |
 | 스트리밍은 OpenAI만 네이티브 | 낮음 | Anthropic, Google은 fallback (non-streaming 후 단일 이벤트) |
-| PyPI 미공개 | 중간 | Trusted Publisher 설정 및 첫 릴리스 필요 |
 
 ---
 
@@ -109,7 +108,7 @@
 ### 0.2.0
 
 - Phase 5 완료: 스트리밍, 로깅, 메시지 추적, 호출 트레이싱, 디버그 모드
-- Phase 6 부분 완료: GitHub repo, CI/CD, 61개 테스트
+- Phase 6 완료: GitHub repo, CI/CD, 61개 테스트, PyPI 배포
 - 새 모듈: `event_log.py`, `tracing.py`, `streaming.py`
 - 새 공개 API: `EventLog`, `AgentEvent`, `Trace`, `Span`, `StreamEvent`, `async_run_stream`
 - `RunResult` 확장: `messages`, `trace`, `event_log` 필드 추가, `format_trace()` 메서드
@@ -119,6 +118,13 @@
 - `ProviderBackend`에 `stream()` 기본 구현 (fallback) 추가
 - `Router.stream_llm()` 메서드 추가
 - Apache License 2.0 적용
+- 패키지 리네이밍: `agnetouto` → `agentouto` (오타 수정)
+- PyPI 배포 완료: Trusted Publisher OIDC, v* 태그 push 트리거
+- CD 워크플로우: release 생성 → v* 태그 push 트리거로 변경
+- README 영문화: 모든 한국어 텍스트 → 영어 번역
+- AI 모델명 최신화: gpt-5.2, gpt-5.3-codex, claude-opus-4-6, claude-sonnet-4-6, gemini-3.1-pro, gemini-3-flash
+- `logo.svg` 추가 및 README 상단 배치
+- Supported Providers 테이블에 Anthropic 호환 서비스 추가 (AWS Bedrock, Vertex AI, Ollama, LiteLLM)
 
 ### 0.1.0 (초기 구현)
 
