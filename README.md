@@ -267,7 +267,7 @@ Two types. No exceptions.
 | Kind | Provider | Example Models | Compatible With |
 |------|----------|----------------|-----------------|
 | `"openai"` | OpenAI API | `gpt-5.2`, `gpt-5.3-codex`, `o3`, `o4-mini` | vLLM, Ollama, LM Studio, any OpenAI-compatible API |
-| `"anthropic"` | Anthropic API | `claude-opus-4-6`, `claude-sonnet-4-6` | — |
+| `"anthropic"` | Anthropic API | `claude-opus-4-6`, `claude-sonnet-4-6` | AWS Bedrock, Google Vertex AI, Ollama, LiteLLM, any Anthropic-compatible API |
 | `"google"` | Google Gemini API | `gemini-3.1-pro`, `gemini-3-flash` | — |
 
 ---
