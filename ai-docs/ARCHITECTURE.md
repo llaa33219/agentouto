@@ -49,6 +49,8 @@ agentouto/
 | `Trace` | class | 호출 트리 빌더 |
 | `Span` | dataclass | 트레이스 트리의 노드 |
 | `StreamEvent` | dataclass | 스트리밍 이벤트 |
+| `Attachment` | dataclass | 파일 첨부 데이터 (이미지, 오디오 등) |
+| `ToolResult` | dataclass | 도구 리치 반환 타입 (텍스트 + 첨부파일) |
 
 ---
 
@@ -96,6 +98,7 @@ class Message:
     receiver: str
     content: str
     call_id: str  # uuid4 자동 생성
+    attachments: list[Attachment] | None = None  # 멀티모달 첨부파일 (선택)
 ```
 
 런타임이 매 에이전트 호출/반환 시점에 Message 객체를 생성하여 `RunResult.messages`에 수집한다.
@@ -111,11 +114,20 @@ def my_func(arg: str) -> str:
     return result
 ```
 
+```python
+@dataclass
+class ToolResult:
+    content: str                              # 텍스트 결과
+    attachments: list[Attachment] | None = None  # 첨부파일 (이미지 등)
+```
+
+`ToolResult`는 도구가 텍스트와 함께 첨부파일을 반환할 때 사용한다. 기존 `str` 반환도 하위 호환된다.
+
 내부 동작:
 1. `func.__name__` → `self.name`
 2. `func.__doc__` → `self.description`
 3. `inspect.signature` + `get_type_hints` → JSON Schema 자동 생성
-4. `execute(**kwargs)` → 함수 실행 (async 지원)
+4. `execute(**kwargs)` → 함수 실행 (async 지원), `str | ToolResult` 반환
 5. `to_schema()` → LLM에 제공할 도구 스키마 반환
 
 타입 매핑: `_PYTHON_TYPE_TO_JSON` 딕셔너리로 Python 타입 → JSON Schema 타입 변환.
@@ -125,18 +137,26 @@ def my_func(arg: str) -> str:
 에이전트별 대화 컨텍스트를 관리하는 프로바이더 비의존적 중간 표현.
 
 ```python
+@dataclass
+class Attachment:
+    mime_type: str                # "image/png", "audio/mp3" 등
+    data: str | None = None      # base64 인코딩된 데이터
+    url: str | None = None       # URL 참조 (data와 상호 배타)
+    name: str | None = None      # 선택적 파일명
+
 class Context:
     system_prompt: str              # 시스템 프롬프트 (읽기 전용)
     messages: list[ContextMessage]  # 대화 이력
 
-    def add_user(content)                          # 유저 메시지 추가
-    def add_assistant_text(content)                 # 어시스턴트 텍스트 추가
-    def add_assistant_tool_calls(tool_calls, content)  # 어시스턴트 도구 호출 추가
-    def add_tool_result(tool_call_id, tool_name, content)  # 도구 결과 추가
+    def add_user(content, attachments=None)                    # 유저 메시지 추가 (첨부파일 선택)
+    def add_assistant_text(content)                            # 어시스턴트 텍스트 추가
+    def add_assistant_tool_calls(tool_calls, content)          # 어시스턴트 도구 호출 추가
+    def add_tool_result(tool_call_id, tool_name, content, attachments=None)  # 도구 결과 추가 (첨부파일 선택)
 ```
 
+`Attachment` dataclass: `mime_type`, `data`, `url`, `name` 보유. `data` 또는 `url` 중 하나 이상 필수.
 `ToolCall` dataclass: `id`, `name`, `arguments` 보유.
-`ContextMessage` dataclass: `role`, `content`, `tool_calls`, `tool_call_id`, `tool_name` 보유.
+`ContextMessage` dataclass: `role`, `content`, `tool_calls`, `tool_call_id`, `tool_name`, `attachments` 보유.
 
 각 프로바이더 백엔드가 이 Context를 자신의 API 포맷으로 변환한다.
 
@@ -175,11 +195,11 @@ class Router:
 ```python
 class Runtime:
     def __init__(router, debug=False)
-    async def execute(agent, forward_message) -> RunResult
-    async def _run_agent_loop(agent, forward_message, call_id, parent_call_id) -> str
-    async def _execute_tool_call(tc, caller_name, caller_call_id) -> str
-    async def execute_stream(agent, forward_message) -> AsyncIterator[StreamEvent]
-    async def _stream_agent_loop(agent, forward_message, call_id, parent_call_id) -> AsyncIterator[StreamEvent]
+    async def execute(agent, forward_message, *, attachments=None) -> RunResult
+    async def _run_agent_loop(agent, forward_message, call_id, parent_call_id, *, attachments=None) -> str
+    async def _execute_tool_call(tc, caller_name, caller_call_id) -> str | ToolResult
+    async def execute_stream(agent, forward_message, *, attachments=None) -> AsyncIterator[StreamEvent]
+    async def _stream_agent_loop(agent, forward_message, call_id, parent_call_id, *, attachments=None) -> AsyncIterator[StreamEvent]
 ```
 
 **디버그 모드:**
@@ -194,18 +214,19 @@ class Runtime:
 
 **에이전트 루프 (`_run_agent_loop`):**
 1. 시스템 프롬프트 생성 → Context 초기화
-2. forward_message를 user 메시지로 추가
+2. forward_message를 user 메시지로 추가 (첨부파일이 있으면 함께 추가)
 3. 무한 루프:
    a. LLM 호출 (이벤트 기록: `llm_call`, `llm_response`)
    b. tool_calls가 없으면 → 텍스트 응답 반환
    c. `finish` 호출이 있으면 → message 반환 (이벤트 기록: `finish`)
    d. tool_calls를 `asyncio.gather`로 병렬 실행 (이벤트 기록: `tool_exec`, `agent_call`)
-   e. 결과(또는 에러)를 tool result로 추가
+   e. 결과를 tool result로 추가 (ToolResult인 경우 첨부파일 포함)
    f. 다음 반복
 
 **도구 실행 (`_execute_tool_call`):**
 - `call_agent` → 대상 에이전트의 `_run_agent_loop` 재귀 호출 (sub_call_id 생성, Message 추적)
-- 일반 도구 → `tool.execute(**kwargs)` 실행, 에러 시 `ToolError` 래핑
+- 일반 도구 → `tool.execute(**kwargs)` 실행 → `str | ToolResult` 반환, 에러 시 `ToolError` 래핑
+- `ToolResult` 반환 시 `content`와 `attachments`를 분리하여 context에 추가
 
 **스트리밍 (`execute_stream` / `_stream_agent_loop`):**
 - `Router.stream_llm()`을 통해 LLM 스트리밍 호출
@@ -216,6 +237,7 @@ class Runtime:
 **`run()` / `async_run()`:**
 - Router 생성 → Runtime 생성 → execute 호출 → RunResult 반환
 - `run()`은 `asyncio.run(async_run(...))` 래퍼
+- `attachments` 파라미터는 keyword-only (`*, attachments: list[Attachment] | None = None`)
 - `debug` 파라미터는 keyword-only (`*, debug: bool = False`)
 
 **`RunResult`:**
@@ -311,7 +333,7 @@ class StreamEvent:
     agent_name: str
     data: dict[str, Any]
 
-async def async_run_stream(entry, message, agents, tools, providers) -> AsyncIterator[StreamEvent]
+async def async_run_stream(entry, message, agents, tools, providers, *, attachments=None) -> AsyncIterator[StreamEvent]
 ```
 
 `async_run_stream()`은 `Runtime.execute_stream()`을 랩한다.
@@ -351,7 +373,7 @@ run(entry, message, agents, tools, providers)
               │
               ├── router.build_system_prompt(agent)  ← 시스템 프롬프트 생성
               ├── Context(system_prompt)              ← 컨텍스트 초기화
-              ├── context.add_user(message)            ← 전달 메시지 추가
+              ├── context.add_user(message, attachments)  ← 전달 메시지 + 첨부파일 추가
               ├── router.build_tool_schemas(agent.name) ← 도구 스키마 생성
               │
               └── while True:
@@ -369,7 +391,7 @@ run(entry, message, agents, tools, providers)
                     │     ├── call_agent → _run_agent_loop(target, msg)  [재귀]
                     │     └── tool → tool.execute(**kwargs)
                     │
-                    └── context.add_tool_result(id, name, result_or_error)
+                    └── context.add_tool_result(id, name, result_or_error, attachments)
 ```
 
 ### 프로바이더 백엔드 데이터 변환
@@ -409,6 +431,7 @@ Context (프로바이더 비의존)
 | 모듈 | 사용 위치 |
 |------|----------|
 | `asyncio` | `runtime.py` — gather, run |
+| `base64` | `providers/google.py` — 첨부파일 바이너리 디코딩 |
 | `json` | `providers/openai.py` — tool call 파싱 |
 | `uuid` | `message.py`, `providers/google.py`, `runtime.py` — ID 생성 |
 | `inspect` | `tool.py` — 함수 시그니처 분석 |

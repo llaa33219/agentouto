@@ -3,10 +3,10 @@ from __future__ import annotations
 import pytest
 
 from agentouto.agent import Agent
-from agentouto.context import Context, ContextMessage, ToolCall
+from agentouto.context import Attachment, Context, ContextMessage, ToolCall
 from agentouto.message import Message
 from agentouto.provider import Provider
-from agentouto.tool import Tool
+from agentouto.tool import Tool, ToolResult
 
 
 # --- Message ---
@@ -164,6 +164,76 @@ class TestTool:
         result = await async_greet.execute(name="World")
         assert result == "Hi World"
 
+    @pytest.mark.asyncio
+    async def test_execute_returns_tool_result(self) -> None:
+        @Tool
+        def fetch_image(url: str) -> ToolResult:
+            return ToolResult(
+                content="fetched image",
+                attachments=[Attachment(mime_type="image/png", data="imgdata")],
+            )
+
+        result = await fetch_image.execute(url="https://example.com/img.png")
+        assert isinstance(result, ToolResult)
+        assert result.content == "fetched image"
+        assert result.attachments is not None
+        assert len(result.attachments) == 1
+        assert result.attachments[0].mime_type == "image/png"
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_str_backward_compat(self) -> None:
+        @Tool
+        def greet(name: str) -> str:
+            return f"Hello, {name}!"
+
+        result = await greet.execute(name="World")
+        assert isinstance(result, str)
+        assert result == "Hello, World!"
+
+
+# --- Attachment ---
+
+
+class TestAttachment:
+    def test_data_attachment(self) -> None:
+        att = Attachment(mime_type="image/png", data="base64data")
+        assert att.mime_type == "image/png"
+        assert att.data == "base64data"
+        assert att.url is None
+        assert att.name is None
+
+    def test_url_attachment(self) -> None:
+        att = Attachment(mime_type="image/jpeg", url="https://example.com/img.jpg", name="photo.jpg")
+        assert att.mime_type == "image/jpeg"
+        assert att.data is None
+        assert att.url == "https://example.com/img.jpg"
+        assert att.name == "photo.jpg"
+
+    def test_defaults(self) -> None:
+        att = Attachment(mime_type="audio/mp3")
+        assert att.mime_type == "audio/mp3"
+        assert att.data is None
+        assert att.url is None
+        assert att.name is None
+
+
+# --- ToolResult ---
+
+
+class TestToolResult:
+    def test_basic(self) -> None:
+        att = Attachment(mime_type="image/png", data="imgdata")
+        tr = ToolResult(content="got image", attachments=[att])
+        assert tr.content == "got image"
+        assert tr.attachments is not None
+        assert len(tr.attachments) == 1
+        assert tr.attachments[0].mime_type == "image/png"
+
+    def test_defaults(self) -> None:
+        tr = ToolResult(content="text only")
+        assert tr.content == "text only"
+        assert tr.attachments is None
+
 
 # --- Context ---
 
@@ -206,6 +276,39 @@ class TestContext:
         assert msg.content == "found it"
         assert msg.tool_call_id == "tc1"
         assert msg.tool_name == "search"
+
+    def test_add_user_with_attachments(self) -> None:
+        ctx = Context("sys")
+        att = Attachment(mime_type="image/png", data="base64data")
+        ctx.add_user("analyze this", attachments=[att])
+        msg = ctx.messages[0]
+        assert msg.role == "user"
+        assert msg.content == "analyze this"
+        assert msg.attachments is not None
+        assert len(msg.attachments) == 1
+        assert msg.attachments[0].mime_type == "image/png"
+        assert msg.attachments[0].data == "base64data"
+
+    def test_add_user_without_attachments_backward_compat(self) -> None:
+        ctx = Context("sys")
+        ctx.add_user("hello")
+        msg = ctx.messages[0]
+        assert msg.role == "user"
+        assert msg.content == "hello"
+        assert msg.attachments is None
+
+    def test_add_tool_result_with_attachments(self) -> None:
+        ctx = Context("sys")
+        att = Attachment(mime_type="image/jpeg", url="https://example.com/img.jpg")
+        ctx.add_tool_result("tc1", "fetch_image", "fetched", attachments=[att])
+        msg = ctx.messages[0]
+        assert msg.role == "tool"
+        assert msg.content == "fetched"
+        assert msg.tool_call_id == "tc1"
+        assert msg.tool_name == "fetch_image"
+        assert msg.attachments is not None
+        assert len(msg.attachments) == 1
+        assert msg.attachments[0].url == "https://example.com/img.jpg"
 
     def test_messages_returns_copy(self) -> None:
         ctx = Context("sys")

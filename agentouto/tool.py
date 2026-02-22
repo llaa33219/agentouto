@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import dataclass
 from typing import Any, Callable, get_type_hints
+
+from agentouto.context import Attachment
 
 _PYTHON_TYPE_TO_JSON: dict[type, str] = {
     str: "string",
@@ -36,6 +39,12 @@ def _build_parameters_schema(func: Callable[..., Any]) -> dict[str, Any]:
     return schema
 
 
+@dataclass
+class ToolResult:
+    content: str
+    attachments: list[Attachment] | None = None
+
+
 class Tool:
     name: str
     description: str
@@ -48,10 +57,12 @@ class Tool:
         self.description = (func.__doc__ or "").strip()
         self.parameters = _build_parameters_schema(func)
 
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> str | ToolResult:
         result = self.func(**kwargs)
         if inspect.isawaitable(result):
             result = await result
+        if isinstance(result, ToolResult):
+            return result
         return str(result)
 
     def to_schema(self) -> dict[str, Any]:

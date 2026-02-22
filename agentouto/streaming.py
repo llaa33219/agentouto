@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from agentouto.agent import Agent
+from agentouto.context import Attachment
 from agentouto.provider import Provider
 from agentouto.tool import Tool
 
@@ -22,11 +23,13 @@ async def async_run_stream(
     agents: list[Agent],
     tools: list[Tool],
     providers: list[Provider],
+    *,
+    attachments: list[Attachment] | None = None,
 ) -> AsyncIterator[StreamEvent]:
     from agentouto.router import Router
     from agentouto.runtime import Runtime
 
     router = Router(agents, tools, providers)
     runtime = Runtime(router)
-    async for event in runtime.execute_stream(entry, message):
+    async for event in runtime.execute_stream(entry, message, attachments=attachments):
         yield event

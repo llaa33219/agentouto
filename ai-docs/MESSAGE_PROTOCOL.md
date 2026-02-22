@@ -35,10 +35,10 @@ Message(type="return", sender="writer", receiver="researcher", content="보고�
 
 런타임은 매 에이전트 호출/반환 시점에 `Message` 객체를 생성하여 추적한다:
 
-- **전달 메시지**: `_run_agent_loop` 진입 시 `Message(type="forward", sender=caller, receiver=agent, content=message)` 생성
+- **전달 메시지**: `_run_agent_loop` 진입 시 `Message(type="forward", sender=caller, receiver=agent, content=message, attachments=attachments)` 생성
 - **반환 메시지**: 에이전트 루프 종료 시 `Message(type="return", sender=agent, receiver=caller, content=result)` 생성
 
-모든 메시지는 `RunResult.messages`에 수집되며, `debug` 모드와 무관하게 항상 기록된다. 각 메시지는 `uuid4` 기반의 `call_id`로 고유하게 식별된다.
+모든 메시지는 `RunResult.messages`에 수집되며, `debug` 모드와 무관하게 항상 기록된다. 각 메시지는 `uuid4` 기반의 `call_id`로 고유하게 식별된다. `attachments` 필드는 멀티모달 첨부파일을 포함하며, 없으면 `None`이다.
 
 ---
 
@@ -229,11 +229,12 @@ Use finish to complete your task and return the result.
 
 ## 8. 사용자 = LLM 없는 에이전트
 
-사용자가 `run(entry=researcher, message="...")` 을 호출하면:
+사용자가 `run(entry=researcher, message="...", attachments=[...])` 을 호출하면:
 
-1. 내부적으로 `_run_agent_loop(researcher, "...")` 호출
+1. 내부적으로 `_run_agent_loop(researcher, "...", attachments=[...])` 호출
 2. 이는 에이전트가 `call_agent(agent_name="researcher", message="...")` 하는 것과 **완전히 동일한 코드 경로**
 3. 반환값도 동일 — 문자열
+4. `attachments`는 첨부파일 데이터를 전달하는 선택적 keyword-only 파라미터
 
 사용자를 위한 별도의 코드 경로, 도구, 프로토콜, 특별 처리는 존재하지 않으며, 앞으로도 추가해서는 안 된다.
 

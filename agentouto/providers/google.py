@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import base64
 import uuid
 from typing import Any
 
 import google.generativeai as genai
 
 from agentouto.agent import Agent
-from agentouto.context import Context, ToolCall
+from agentouto.context import Attachment, Context, ToolCall
 from agentouto.exceptions import ProviderError
 from agentouto.provider import Provider
 from agentouto.providers import LLMResponse, ProviderBackend
@@ -88,6 +89,30 @@ class GoogleBackend(ProviderBackend):
         return LLMResponse(content=content_text, tool_calls=parsed_calls)
 
 
+def _build_attachment_parts(attachments: list[Attachment]) -> list[Any]:
+    parts: list[Any] = []
+    for att in attachments:
+        if att.data:
+            parts.append(
+                genai.protos.Part(
+                    inline_data=genai.protos.Blob(
+                        mime_type=att.mime_type,
+                        data=base64.b64decode(att.data),
+                    )
+                )
+            )
+        elif att.url:
+            parts.append(
+                genai.protos.Part(
+                    file_data=genai.protos.FileData(
+                        mime_type=att.mime_type,
+                        file_uri=att.url,
+                    )
+                )
+            )
+    return parts
+
+
 def _build_contents(context: Context) -> list[Any]:
     contents: list[Any] = []
     ctx_messages = context.messages
@@ -97,16 +122,16 @@ def _build_contents(context: Context) -> list[Any]:
         msg = ctx_messages[i]
 
         if msg.role == "user":
+            parts: list[Any] = [genai.protos.Part(text=msg.content or "")]
+            if msg.attachments:
+                parts.extend(_build_attachment_parts(msg.attachments))
             contents.append(
-                genai.protos.Content(
-                    role="user",
-                    parts=[genai.protos.Part(text=msg.content or "")],
-                )
+                genai.protos.Content(role="user", parts=parts)
             )
             i += 1
 
         elif msg.role == "assistant":
-            parts: list[Any] = []
+            parts = []
             if msg.content:
                 parts.append(genai.protos.Part(text=msg.content))
             if msg.tool_calls:
@@ -124,14 +149,17 @@ def _build_contents(context: Context) -> list[Any]:
         elif msg.role == "tool":
             parts = []
             while i < len(ctx_messages) and ctx_messages[i].role == "tool":
+                tmsg = ctx_messages[i]
                 parts.append(
                     genai.protos.Part(
                         function_response=genai.protos.FunctionResponse(
-                            name=ctx_messages[i].tool_name or "",
-                            response={"result": ctx_messages[i].content or ""},
+                            name=tmsg.tool_name or "",
+                            response={"result": tmsg.content or ""},
                         )
                     )
                 )
+                if tmsg.attachments:
+                    parts.extend(_build_attachment_parts(tmsg.attachments))
                 i += 1
             contents.append(genai.protos.Content(role="function", parts=parts))
 

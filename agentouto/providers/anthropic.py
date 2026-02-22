@@ -5,7 +5,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 
 from agentouto.agent import Agent
-from agentouto.context import Context, ToolCall
+from agentouto.context import Attachment, Context, ToolCall
 from agentouto.exceptions import ProviderError
 from agentouto.provider import Provider
 from agentouto.providers import LLMResponse, ProviderBackend
@@ -71,6 +71,29 @@ class AnthropicBackend(ProviderBackend):
         return LLMResponse(content=content_text, tool_calls=parsed_calls)
 
 
+def _build_attachment_blocks(attachments: list[Attachment]) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    for att in attachments:
+        if att.mime_type.startswith("image/"):
+            source: dict[str, Any]
+            if att.data:
+                source = {"type": "base64", "media_type": att.mime_type, "data": att.data}
+            elif att.url:
+                source = {"type": "url", "url": att.url}
+            else:
+                continue
+            blocks.append({"type": "image", "source": source})
+        elif att.mime_type == "application/pdf":
+            if att.data:
+                source = {"type": "base64", "media_type": att.mime_type, "data": att.data}
+            elif att.url:
+                source = {"type": "url", "url": att.url}
+            else:
+                continue
+            blocks.append({"type": "document", "source": source})
+    return blocks
+
+
 def _build_messages(context: Context) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     ctx_messages = context.messages
@@ -80,11 +103,18 @@ def _build_messages(context: Context) -> list[dict[str, Any]]:
         msg = ctx_messages[i]
 
         if msg.role == "user":
-            messages.append({"role": "user", "content": msg.content or ""})
+            if msg.attachments:
+                content_blocks: list[dict[str, Any]] = [
+                    {"type": "text", "text": msg.content or ""}
+                ]
+                content_blocks.extend(_build_attachment_blocks(msg.attachments))
+                messages.append({"role": "user", "content": content_blocks})
+            else:
+                messages.append({"role": "user", "content": msg.content or ""})
             i += 1
 
         elif msg.role == "assistant":
-            content_blocks: list[dict[str, Any]] = []
+            content_blocks = []
             if msg.content:
                 content_blocks.append({"type": "text", "text": msg.content})
             if msg.tool_calls:
@@ -103,13 +133,23 @@ def _build_messages(context: Context) -> list[dict[str, Any]]:
         elif msg.role == "tool":
             tool_results: list[dict[str, Any]] = []
             while i < len(ctx_messages) and ctx_messages[i].role == "tool":
-                tool_results.append(
-                    {
+                tmsg = ctx_messages[i]
+                if tmsg.attachments:
+                    result_content: list[dict[str, Any]] = []
+                    if tmsg.content:
+                        result_content.append({"type": "text", "text": tmsg.content})
+                    result_content.extend(_build_attachment_blocks(tmsg.attachments))
+                    tool_results.append({
                         "type": "tool_result",
-                        "tool_use_id": ctx_messages[i].tool_call_id,
-                        "content": ctx_messages[i].content or "",
-                    }
-                )
+                        "tool_use_id": tmsg.tool_call_id,
+                        "content": result_content,
+                    })
+                else:
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tmsg.tool_call_id,
+                        "content": tmsg.content or "",
+                    })
                 i += 1
             messages.append({"role": "user", "content": tool_results})
 

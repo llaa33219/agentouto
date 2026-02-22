@@ -10,7 +10,7 @@
 
 **버전:** 0.2.0 (공개)
 
-**최종 업데이트:** Phase 5-6 완료, PyPI 공개
+**최종 업데이트:** Phase 7 완료 — 멀티모달 첨부파일 지원
 
 ---
 
@@ -78,13 +78,26 @@
 - [ ] 사용자 문서 (예제 중심)
 - [ ] API 레퍼런스 문서 자동 생성
 
+### Phase 7: 멀티모달 첨부파일 ✅
+
+- [x] `Attachment` 데이터클래스 — mime_type, data (base64), url, name
+- [x] `ToolResult` 데이터클래스 — 도구가 텍스트 + 첨부파일을 함께 반환
+- [x] `ContextMessage.attachments` 필드 추가
+- [x] `Context.add_user()` / `add_tool_result()` 첨부파일 지원
+- [x] `Message.attachments` 필드 추가
+- [x] `run()` / `async_run()` / `async_run_stream()` 에 `attachments` 파라미터 추가
+- [x] Runtime: attachments 전달 파이프라인 + ToolResult 분기 처리
+- [x] OpenAI 백엔드: image_url, input_audio 첨부파일 변환
+- [x] Anthropic 백엔드: image (base64/url), document (PDF) 첨부파일 변환
+- [x] Google 백엔드: inline_data (Blob), file_data (FileData) 첨부파일 변환
+- [x] 74개 테스트 (Attachment, ToolResult, 첨부파일 전달 테스트 포함)
+- [x] 하위 호환성 100% 보장 — 모든 새 파라미터 기본값 None
+
 ---
 
 ## 3. 미구현 기능
 
 ### 추가 고려 사항
-
-- [ ] 멀티모달 입력 지원 (이미지, 파일 등)
 - [ ] 토큰 사용량 추적
 - [ ] 비용 추적
 - [ ] 타임아웃 설정 (에이전트 레벨)
@@ -100,15 +113,32 @@
 | Google 전역 설정 충돌 | 중간 | `genai.configure()`가 전역이므로 여러 Google Provider 동시 사용 시 충돌 가능 |
 | 무한 루프 방지 없음 | 낮음 (설계 의도) | 시스템 레벨 제한 없음. instructions로만 제어. 철학적 결정. |
 | 스트리밍은 OpenAI만 네이티브 | 낮음 | Anthropic, Google은 fallback (non-streaming 후 단일 이벤트) |
+| 멀티모달 프로바이더별 지원 범위 | 낮음 | OpenAI: image/audio, Anthropic: image/PDF, Google: 모든 타입. 미지원 타입은 조용히 무시 |
 
 ---
 
 ## 5. 변경 이력
 
+### 0.2.1 (Phase 7: 멀티모달)
+
+- Phase 7 완료: 멀티모달 첨부파일 지원
+- 새 데이터클래스: `Attachment` (context.py), `ToolResult` (tool.py)
+- `ContextMessage.attachments` 필드 추가
+- `Message.attachments` 필드 추가
+- `run()`, `async_run()`, `async_run_stream()` 에 keyword-only `attachments` 파라미터 추가
+- Runtime: attachments 전달 파이프라인, ToolResult 분기 처리
+- `Tool.execute()` 반환 타입: `str` → `str | ToolResult`
+- OpenAI 백엔드: `_build_attachment_parts()` — image_url, input_audio
+- Anthropic 백엔드: `_build_attachment_blocks()` — image, document (PDF)
+- Google 백엔드: `_build_attachment_parts()` — inline_data (Blob), file_data (FileData)
+- 새 공개 API: `Attachment`, `ToolResult`
+- 테스트 61개 → 74개 (Attachment, ToolResult, 첨부파일 전달 테스트 추가)
+- 하위 호환성 100% 보장
+
 ### 0.2.0
 
 - Phase 5 완료: 스트리밍, 로깅, 메시지 추적, 호출 트레이싱, 디버그 모드
-- Phase 6 완료: GitHub repo, CI/CD, 61개 테스트, PyPI 배포
+- Phase 6 완료: GitHub repo, CI/CD, 테스트, PyPI 배포
 - 새 모듈: `event_log.py`, `tracing.py`, `streaming.py`
 - 새 공개 API: `EventLog`, `AgentEvent`, `Trace`, `Span`, `StreamEvent`, `async_run_stream`
 - `RunResult` 확장: `messages`, `trace`, `event_log` 필드 추가, `format_trace()` 메서드

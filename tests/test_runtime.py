@@ -6,11 +6,11 @@ from unittest.mock import patch
 import pytest
 
 from agentouto.agent import Agent
-from agentouto.context import Context, ToolCall
+from agentouto.context import Attachment, Context, ToolCall
 from agentouto.provider import Provider
 from agentouto.providers import LLMResponse, ProviderBackend
 from agentouto.runtime import RunResult, async_run
-from agentouto.tool import Tool
+from agentouto.tool import Tool, ToolResult
 
 
 class MockBackend(ProviderBackend):
@@ -349,6 +349,74 @@ class TestParallelToolCalls:
             )
         assert result.output == "Got both results"
         assert mock._call_count == 2
+
+
+class TestAttachmentsPassthrough:
+    @pytest.mark.asyncio
+    async def test_attachments_passed_to_context(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([_finish("analyzed")])
+        att = Attachment(mime_type="image/png", data="base64data")
+        with patch("agentouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Analyze this image",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+                attachments=[att],
+            )
+        assert result.output == "analyzed"
+        forward_msgs = [m for m in result.messages if m.type == "forward"]
+        assert len(forward_msgs) == 1
+        assert forward_msgs[0].attachments is not None
+        assert len(forward_msgs[0].attachments) == 1
+        assert forward_msgs[0].attachments[0].mime_type == "image/png"
+
+    @pytest.mark.asyncio
+    async def test_tool_result_with_attachments(
+        self, agent_a: Agent, provider: Provider,
+    ) -> None:
+        @Tool
+        def fetch_image(url: str) -> ToolResult:
+            """Fetch an image."""
+            return ToolResult(
+                content="fetched",
+                attachments=[Attachment(mime_type="image/png", data="imgdata")],
+            )
+
+        mock = MockBackend([
+            _tool_call("fetch_image", "tc1", url="https://example.com/img.png"),
+            _finish("Image shows a cat"),
+        ])
+        with patch("agentouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Fetch and analyze the image",
+                agents=[agent_a],
+                tools=[fetch_image],
+                providers=[provider],
+            )
+        assert result.output == "Image shows a cat"
+        assert mock._call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_attachments_backward_compat(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([_finish("result")])
+        with patch("agentouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Hello",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "result"
+        forward_msgs = [m for m in result.messages if m.type == "forward"]
+        assert forward_msgs[0].attachments is None
 
 
 class TestMessagesAlwaysPopulated:

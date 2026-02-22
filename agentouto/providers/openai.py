@@ -7,7 +7,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from agentouto.agent import Agent
-from agentouto.context import Context, ToolCall
+from agentouto.context import Attachment, Context, ToolCall
 from agentouto.exceptions import ProviderError
 from agentouto.provider import Provider
 from agentouto.providers import LLMResponse, ProviderBackend
@@ -155,6 +155,18 @@ class OpenAIBackend(ProviderBackend):
         )
 
 
+def _build_attachment_parts(attachments: list[Attachment]) -> list[dict[str, Any]]:
+    parts: list[dict[str, Any]] = []
+    for att in attachments:
+        if att.mime_type.startswith("image/"):
+            url = att.url or f"data:{att.mime_type};base64,{att.data}"
+            parts.append({"type": "image_url", "image_url": {"url": url}})
+        elif att.mime_type.startswith("audio/"):
+            fmt = att.mime_type.split("/")[-1]
+            parts.append({"type": "input_audio", "input_audio": {"data": att.data, "format": fmt}})
+    return parts
+
+
 def _build_messages(context: Context) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": context.system_prompt}
@@ -162,7 +174,14 @@ def _build_messages(context: Context) -> list[dict[str, Any]]:
 
     for msg in context.messages:
         if msg.role == "user":
-            messages.append({"role": "user", "content": msg.content})
+            if msg.attachments:
+                content_parts: list[dict[str, Any]] = [
+                    {"type": "text", "text": msg.content or ""}
+                ]
+                content_parts.extend(_build_attachment_parts(msg.attachments))
+                messages.append({"role": "user", "content": content_parts})
+            else:
+                messages.append({"role": "user", "content": msg.content})
         elif msg.role == "assistant":
             entry: dict[str, Any] = {"role": "assistant", "content": msg.content}
             if msg.tool_calls:
@@ -179,13 +198,22 @@ def _build_messages(context: Context) -> list[dict[str, Any]]:
                 ]
             messages.append(entry)
         elif msg.role == "tool":
-            messages.append(
-                {
+            if msg.attachments:
+                content_parts = [
+                    {"type": "text", "text": msg.content or ""}
+                ]
+                content_parts.extend(_build_attachment_parts(msg.attachments))
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": msg.tool_call_id,
+                    "content": content_parts,
+                })
+            else:
+                messages.append({
                     "role": "tool",
                     "tool_call_id": msg.tool_call_id,
                     "content": msg.content or "",
-                }
-            )
+                })
 
     return messages
 

@@ -101,6 +101,17 @@ Context → OpenAI 메시지 포맷:
 
 모든 API 호출을 `try/except`로 감싸고 `ProviderError`로 래핑. 빈 응답 (choices 없음)도 `ProviderError` 발생.
 
+### 멀티모달 첨부파일 처리
+
+`_build_messages`에서 `ContextMessage.attachments`가 있으면 `content`를 multipart 배열로 변환:
+
+| mime_type | OpenAI content part 타입 | 구조 |
+|---|---|---|
+| `image/*` | `image_url` | `{"type": "image_url", "image_url": {"url": data_uri_or_url}}` |
+| `audio/*` | `input_audio` | `{"type": "input_audio", "input_audio": {"data": base64, "format": fmt}}` |
+
+user 메시지와 tool 메시지 모두에서 첨부파일 처리. 첨부파일이 없으면 기존과 동일한 문자열 content 사용.
+
 ---
 
 ## 4. Anthropic 백엔드 (`providers/anthropic.py`)
@@ -150,6 +161,18 @@ if agent.reasoning:
     }
     params["temperature"] = 1  # 필수
 ```
+
+### 멀티모달 첨부파일 처리
+
+`_build_messages`에서 `ContextMessage.attachments`가 있으면 content blocks 배열로 변환:
+
+| mime_type | Anthropic content block 타입 | source 타입 |
+|---|---|---|
+| `image/*` | `image` | `base64` (data) 또는 `url` (url) |
+| `application/pdf` | `document` | `base64` (data) 또는 `url` (url) |
+
+user 메시지: content blocks 배열로 변환 (`[{"type": "text", ...}, {"type": "image", ...}]`).
+tool result: tool_result 내 content 배열에 첨부파일 블록 포함.
 
 ---
 
@@ -204,6 +227,20 @@ if agent.reasoning:
     }
 ```
 
+### 멀티모달 첨부파일 처리
+
+`_build_contents`에서 `ContextMessage.attachments`가 있으면 Part 객체를 추가:
+
+| 데이터 소스 | Google Part 타입 | 구조 |
+|---|---|---|
+| `data` (base64) | `inline_data` | `Part(inline_data=Blob(mime_type=..., data=base64.b64decode(...)))` |
+| `url` | `file_data` | `Part(file_data=FileData(mime_type=..., file_uri=...))` |
+
+user 메시지: text Part 뒤에 첨부파일 Part 추가.
+tool 결과: function_response Part 뒤에 첨부파일 Part 추가.
+
+Google 백엔드는 mime_type을 필터링하지 않으므로 모든 파일 타입 (이미지, 오디오, 비디오 등)을 지원한다.
+
 ---
 
 ## 6. 새 프로바이더 추가 시
@@ -228,6 +265,7 @@ if agent.reasoning:
 - [ ] 빈 응답 처리
 - [ ] tool_call arguments 파싱 (안전한 방식)
 - [ ] tool_call ID 처리
+- [ ] 멀티모달 첨부파일 처리 (`_build_messages`에서 user/tool 메시지의 attachments 변환)
 
 ---
 
@@ -235,4 +273,4 @@ if agent.reasoning:
 
 1. **Google 전역 설정**: `genai.configure()`가 전역이므로 여러 Google Provider를 동시에 사용하면 충돌 가능.
 2. **스트리밍 부분 지원**: OpenAI 백엔드만 네이티브 스트리밍 구현. Anthropic, Google은 fallback (non-streaming 호출 후 단일 이벤트 반환).
-3. **비전/멀티모달 미지원**: 텍스트 기반 호출만 지원. 이미지 등의 멀티모달 입력은 미구현.
+3. **멀티모달 프로바이더별 지원 범위**: 프로바이더별로 지원하는 첨부파일 타입이 다르다. OpenAI는 image/audio, Anthropic은 image/PDF, Google은 모든 타입. 지원되지 않는 mime_type의 첨부파일은 조용히 무시된다.

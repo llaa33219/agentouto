@@ -5,6 +5,14 @@ from typing import Any
 
 
 @dataclass
+class Attachment:
+    mime_type: str
+    data: str | None = None
+    url: str | None = None
+    name: str | None = None
+
+
+@dataclass
 class ToolCall:
     id: str
     name: str
@@ -18,6 +26,7 @@ class ContextMessage:
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
     tool_name: str | None = None
+    attachments: list[Attachment] | None = None
 
 
 class Context:
@@ -33,8 +42,8 @@ class Context:
     def messages(self) -> list[ContextMessage]:
         return list(self._messages)
 
-    def add_user(self, content: str) -> None:
-        self._messages.append(ContextMessage(role="user", content=content))
+    def add_user(self, content: str, attachments: list[Attachment] | None = None) -> None:
+        self._messages.append(ContextMessage(role="user", content=content, attachments=attachments))
 
     def add_assistant_text(self, content: str) -> None:
         self._messages.append(ContextMessage(role="assistant", content=content))
@@ -44,12 +53,19 @@ class Context:
             ContextMessage(role="assistant", content=content, tool_calls=tool_calls)
         )
 
-    def add_tool_result(self, tool_call_id: str, tool_name: str, content: str) -> None:
+    def add_tool_result(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        content: str,
+        attachments: list[Attachment] | None = None,
+    ) -> None:
         self._messages.append(
             ContextMessage(
                 role="tool",
                 content=content,
                 tool_call_id=tool_call_id,
                 tool_name=tool_name,
+                attachments=attachments,
             )
         )
