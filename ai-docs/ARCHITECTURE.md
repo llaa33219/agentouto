@@ -126,11 +126,17 @@ class ToolResult:
 내부 동작:
 1. `func.__name__` → `self.name`
 2. `func.__doc__` → `self.description`
-3. `inspect.signature` + `get_type_hints` → JSON Schema 자동 생성
+3. `inspect.signature` + `get_type_hints(func, include_extras=True)` → JSON Schema 자동 생성
 4. `execute(**kwargs)` → 함수 실행 (async 지원), `str | ToolResult` 반환
 5. `to_schema()` → LLM에 제공할 도구 스키마 반환
 
-타입 매핑: `_PYTHON_TYPE_TO_JSON` 딕셔너리로 Python 타입 → JSON Schema 타입 변환.
+**파라미터 스키마 생성 (`_build_parameters_schema`):**
+- 기본 타입 매핑: `_PYTHON_TYPE_TO_JSON` 딕셔너리로 Python 타입 → JSON Schema 타입 변환
+- `Annotated[T, "설명"]` → `{"type": ..., "description": "설명"}` (파라미터 설명)
+- `Literal["a", "b"]` → `{"type": "string", "enum": ["a", "b"]}` (허용 값 제한)
+- `enum.Enum` 서브클래스 → `{"type": ..., "enum": [값들]}` (열거형)
+- 기본값 있는 파라미터 → `{"default": 값}` 추가, `required`에서 제외
+- 조합 가능: `Annotated[Literal["ko", "en"], "언어"] = "ko"` → description + enum + default 모두 포함
 
 ### `context.py` — Context
 

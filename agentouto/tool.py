@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import enum
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable, get_type_hints
+from typing import Annotated, Any, Callable, Literal, get_args, get_origin, get_type_hints
 
 from agentouto.context import Attachment
 
@@ -17,18 +18,49 @@ _PYTHON_TYPE_TO_JSON: dict[type, str] = {
 
 
 def _build_parameters_schema(func: Callable[..., Any]) -> dict[str, Any]:
-    hints = get_type_hints(func)
+    hints = get_type_hints(func, include_extras=True)
     sig = inspect.signature(func)
     properties: dict[str, Any] = {}
     required: list[str] = []
 
     for name, param in sig.parameters.items():
         annotation = hints.get(name, str)
-        json_type = _PYTHON_TYPE_TO_JSON.get(annotation, "string")
-        properties[name] = {"type": json_type}
+        prop: dict[str, Any] = {}
 
-        if param.default is inspect.Parameter.empty:
+        if get_origin(annotation) is Annotated:
+            args = get_args(annotation)
+            annotation = args[0]
+            for metadata in args[1:]:
+                if isinstance(metadata, str):
+                    prop["description"] = metadata
+                    break
+
+        if get_origin(annotation) is Literal:
+            values = get_args(annotation)
+            if values:
+                prop["type"] = _PYTHON_TYPE_TO_JSON.get(type(values[0]), "string")
+                prop["enum"] = list(values)
+            else:
+                prop["type"] = "string"
+        elif isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+            members = list(annotation)
+            if members:
+                prop["type"] = _PYTHON_TYPE_TO_JSON.get(type(members[0].value), "string")
+            else:
+                prop["type"] = "string"
+            prop["enum"] = [e.value for e in annotation]
+        else:
+            prop["type"] = _PYTHON_TYPE_TO_JSON.get(annotation, "string")
+
+        if param.default is not inspect.Parameter.empty:
+            default_val = param.default
+            if isinstance(default_val, enum.Enum):
+                default_val = default_val.value
+            prop["default"] = default_val
+        else:
             required.append(name)
+
+        properties[name] = prop
 
     schema: dict[str, Any] = {
         "type": "object",

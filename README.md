@@ -246,6 +246,39 @@ async def fetch_data(url: str) -> str:
 
 Tools are automatically converted to JSON schemas from function signatures and docstrings. All agents can use all tools.
 
+#### Rich Parameter Schemas
+
+Use `Annotated` for parameter descriptions, `Literal` for allowed values, `Enum` for enumerated types, and default values — all reflected in the JSON schema sent to the LLM:
+
+```python
+from typing import Annotated, Literal
+from agentouto import Tool
+
+@Tool
+def search_web(
+    query: Annotated[str, "Search keywords or question"],
+    max_results: Annotated[int, "Maximum number of results to return"] = 10,
+    language: Literal["ko", "en", "ja"] = "ko",
+) -> str:
+    """Search the web for information."""
+    ...
+```
+
+This generates a detailed schema that helps the LLM use tools correctly:
+
+```json
+{
+  "properties": {
+    "query": {"type": "string", "description": "Search keywords or question"},
+    "max_results": {"type": "integer", "description": "Maximum number of results to return", "default": 10},
+    "language": {"type": "string", "enum": ["ko", "en", "ja"], "default": "ko"}
+  },
+  "required": ["query"]
+}
+```
+
+Plain type hints (without `Annotated`) continue to work as before.
+
 Tools can also return rich results with file attachments using `ToolResult`:
 
 ```python
@@ -395,6 +428,7 @@ agentouto/
 | **5** | Streaming, logging, tracing, debug mode | ✅ Done |
 | **6** | CI/CD, tests, PyPI publish | ✅ Done |
 | **7** | Multimodal attachments (Attachment, ToolResult) | ✅ Done |
+| **8** | Rich parameter schemas (Annotated, Literal, Enum, default) | ✅ Done |
 
 ---
 
