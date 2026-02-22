@@ -109,7 +109,7 @@ class Router:
 
         lines.append("")
         lines.append("Use call_agent to delegate work to other agents.")
-        lines.append("Use finish to complete your task and return the result.")
+        lines.append("Always use the finish tool to return your final result to the caller.")
 
         return "\n".join(lines)
 

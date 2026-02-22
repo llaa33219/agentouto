@@ -10,7 +10,7 @@
 
 **버전:** 0.5.0 (공개)
 
-**최종 업데이트:** Phase 11 완료 — Anthropic 네이티브 스트리밍
+**최종 업데이트:** Phase 12 완료 — finish() 강제화
 
 ---
 
@@ -129,6 +129,15 @@
 - [x] probe trick 스트리밍 컨텍스트에서도 동작
 - [x] 141개 테스트
 
+### Phase 12: finish() 강제화 ✅
+
+- [x] 텍스트 전용 응답 시 `finish` 사용 유도 (nudge) — context에 안내 메시지 추가 후 재시도
+- [x] 재시도 횟수 제한 없음 — 철학에 따라 시스템 레벨 제한 불허
+- [x] `_run_agent_loop` + `_stream_agent_loop` 모두 적용
+- [x] 시스템 프롬프트에서 finish 사용 강조
+- [x] 경고 로그 출력 (LLM이 finish 사용 안 할 때)
+- [x] 143개 테스트 (스트리밍 nudge 테스트 포함)
+
 ---
 
 ## 3. 미구현 기능
@@ -155,6 +164,15 @@
 ---
 
 ## 5. 변경 이력
+
+### 0.8.0 (Phase 12: finish() 강제화)
+
+- runtime.py: 텍스트 전용 응답 시 finish nudge 로직 추가 (`_run_agent_loop` + `_stream_agent_loop`)
+- 재시도 횟수 제한 없음 — 철학에 따라 시스템 레벨 제한 불허
+- router.py: 시스템 프롬프트에서 finish 사용 강조
+- 에이전트의 일반 메시지 출력과 반환값의 명확한 분리
+- 테스트 141개 → 143개
+- ai-docs 업데이트 (MESSAGE_PROTOCOL, ARCHITECTURE, ROADMAP)
 
 ### 0.5.0 (Phase 9–10)
 

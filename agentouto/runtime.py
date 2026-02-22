@@ -23,6 +23,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("agentouto")
 
+_FINISH_NUDGE = (
+    "You must use the `finish` tool to return your final result. "
+    "Do not respond with plain text — call finish(message=\"your result\")."
+)
+
 
 @dataclass
 class RunResult:
@@ -124,7 +129,13 @@ class Runtime:
             })
 
             if not response.tool_calls:
-                return response.content or ""
+                logger.warning(
+                    "[%s] Agent responded with text instead of finish(), nudging",
+                    agent.name,
+                )
+                context.add_assistant_text(response.content or "")
+                context.add_user(_FINISH_NUDGE)
+                continue
 
             finish_call = _find_finish(response.tool_calls)
             if finish_call is not None:
@@ -284,12 +295,13 @@ class Runtime:
                 return
 
             if not response.tool_calls:
-                yield StreamEvent(
-                    type="finish",
-                    agent_name=agent.name,
-                    data={"output": response.content or ""},
+                logger.warning(
+                    "[%s] Agent responded with text instead of finish(), nudging",
+                    agent.name,
                 )
-                return
+                context.add_assistant_text(response.content or "")
+                context.add_user(_FINISH_NUDGE)
+                continue
 
             finish_call = _find_finish(response.tool_calls)
             if finish_call is not None:

@@ -116,10 +116,14 @@ def upper_tool() -> Tool:
 
 class TestSingleAgentTextResponse:
     @pytest.mark.asyncio
-    async def test_llm_returns_text(
+    async def test_text_response_triggers_nudge_then_finish(
         self, agent_a: Agent, provider: Provider, search_tool: Tool,
     ) -> None:
-        mock = MockBackend([_text("Hello from LLM")])
+        """Text-only response nudges the LLM; finish on retry is accepted."""
+        mock = MockBackend([
+            _text("Hello from LLM"),
+            _finish("Hello from LLM"),
+        ])
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 entry=agent_a,
@@ -129,6 +133,7 @@ class TestSingleAgentTextResponse:
                 providers=[provider],
             )
         assert result.output == "Hello from LLM"
+        assert mock._call_count == 2
 
 
 class TestSingleAgentFinish:
@@ -417,6 +422,101 @@ class TestAttachmentsPassthrough:
         assert result.output == "result"
         forward_msgs = [m for m in result.messages if m.type == "forward"]
         assert forward_msgs[0].attachments is None
+
+
+class TestFinishNudge:
+    @pytest.mark.asyncio
+    async def test_multiple_nudges_until_finish(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        """Agent is nudged repeatedly until it uses finish()."""
+        mock = MockBackend([
+            _text("thinking..."),
+            _text("still thinking..."),
+            _text("almost done..."),
+            _finish("done"),
+        ])
+        with patch("agentouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Hello",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "done"
+        assert mock._call_count == 4
+
+    @pytest.mark.asyncio
+    async def test_nudge_message_added_to_context(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        """Nudge adds assistant text + user nudge message to context."""
+        from agentouto.runtime import _FINISH_NUDGE
+
+        contexts_seen: list[Context] = []
+
+        class CapturingBackend(ProviderBackend):
+            def __init__(self) -> None:
+                self._call_count = 0
+
+            async def call(
+                self,
+                context: Context,
+                tools: list[dict[str, Any]],
+                agent: Agent,
+                provider: Provider,
+            ) -> LLMResponse:
+                contexts_seen.append(context)
+                self._call_count += 1
+                if self._call_count == 1:
+                    return _text("raw text")
+                return _finish("proper result")
+
+        mock = CapturingBackend()
+        with patch("agentouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Hello",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "proper result"
+        second_ctx = contexts_seen[1]
+        msgs = second_ctx.messages
+        assert msgs[-2].role == "assistant"
+        assert msgs[-2].content == "raw text"
+        assert msgs[-1].role == "user"
+        assert _FINISH_NUDGE in (msgs[-1].content or "")
+
+
+class TestFinishNudgeStreaming:
+    @pytest.mark.asyncio
+    async def test_stream_text_response_triggers_nudge_then_finish(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        """Streaming: text-only response nudges, finish on retry is accepted."""
+        from agentouto.streaming import StreamEvent, async_run_stream
+
+        mock = MockBackend([
+            _text("intermediate"),
+            _finish("final result"),
+        ])
+        with patch("agentouto.router.get_backend", return_value=mock):
+            events: list[StreamEvent] = []
+            async for event in async_run_stream(
+                entry=agent_a,
+                message="Hello",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            ):
+                events.append(event)
+        finish_events = [e for e in events if e.type == "finish"]
+        assert len(finish_events) == 1
+        assert finish_events[0].data["output"] == "final result"
+        assert mock._call_count == 2
 
 
 class TestMessagesAlwaysPopulated:

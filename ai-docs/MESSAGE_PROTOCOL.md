@@ -108,11 +108,15 @@ LLM에게 제공되는 `finish` 도구:
 3. `finish.arguments["message"]`를 반환값으로 사용
 4. 에이전트 루프 종료
 
-### 텍스트 응답 폴백
+### finish 강제 (Finish Nudge)
 
 LLM이 `finish`를 호출하지 않고 도구 호출 없이 텍스트만 응답한 경우:
-- `response.tool_calls`가 비어있으면 `response.content`를 반환값으로 사용
-- 이는 LLM이 명시적으로 `finish`를 호출하지 않아도 동작하게 하는 안전장치
+- 해당 텍스트를 context에 assistant 메시지로 추가
+- "`finish` 도구를 사용하라"는 안내를 user 메시지로 추가
+- 루프를 재시도하여 LLM이 `finish()`를 호출할 때까지 계속 유도
+- 재시도 횟수 제한 없음 — 철학에 따라 시스템 레벨 제한을 두지 않음
+
+이 메커니즘은 에이전트의 **일반 메시지 출력**과 **명시적 반환값**을 명확히 분리한다. `RunResult.output`은 항상 `finish(message=...)` 로 명시적으로 결정된 값이다.
 
 ---
 
@@ -127,7 +131,7 @@ LLM이 `finish`를 호출하지 않고 도구 호출 없이 텍스트만 응답�
     │      ▼
     │   LLM 응답 분석
     │      │
-    │      ├── tool_calls 없음     → content 반환 → 루프 종료
+    │      ├── tool_calls 없음     → finish nudge (제한 없이 재시도)
     │      ├── finish 포함          → finish.message 반환 → 루프 종료
     │      └── tool_calls 있음     → asyncio.gather로 병렬 실행
     │                                    │
@@ -141,8 +145,8 @@ LLM이 `finish`를 호출하지 않고 도구 호출 없이 텍스트만 응답�
 
 ### 루프 종료 조건
 
-1. `finish` 도구 호출 → 명시적 종료
-2. 도구 호출 없이 텍스트 응답 → 암시적 종료
+1. `finish` 도구 호출 → 명시적 종료 (**유일한 종료 경로**)
+2. 텍스트 전용 응답 → finish nudge 재시도 (제한 없음)
 
 ### 루프 내 상태
 
@@ -210,7 +214,7 @@ Available agents:
 - reviewer: 품질 검토 전문가.
 
 Use call_agent to delegate work to other agents.
-Use finish to complete your task and return the result.
+Always use the finish tool to return your final result to the caller.
 ```
 
 ### 포함되는 정보

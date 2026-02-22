@@ -237,7 +237,7 @@ class Runtime:
 2. forward_message를 user 메시지로 추가 (첨부파일이 있으면 함께 추가)
 3. 무한 루프:
    a. LLM 호출 (이벤트 기록: `llm_call`, `llm_response`)
-   b. tool_calls가 없으면 → 텍스트 응답 반환
+   b. tool_calls가 없으면 → finish nudge (context에 안내 추가, 제한 없이 재시도)
    c. `finish` 호출이 있으면 → message 반환 (이벤트 기록: `finish`)
    d. tool_calls를 `asyncio.gather`로 병렬 실행 (이벤트 기록: `tool_exec`, `agent_call`)
    e. 결과를 tool result로 추가 (ToolResult인 경우 첨부파일 포함)
@@ -409,7 +409,7 @@ run(entry, message, agents, tools, providers)
                     │     └── backend.call(context, schemas, agent, provider)
                     │           └── LLMResponse(content, tool_calls)
                     │
-                    ├── no tool_calls? → return content
+                    ├── no tool_calls? → finish nudge (제한 없이 재시도)
                     ├── finish found? → return finish.message
                     │
                     ├── context.add_assistant_tool_calls(tool_calls)
