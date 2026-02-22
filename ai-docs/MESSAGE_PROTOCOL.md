@@ -90,7 +90,7 @@ LLM에게 제공되는 `finish` 도구:
 ```json
 {
   "name": "finish",
-  "description": "Finish the current task and return a result to the caller. The caller may be a user or another agent.",
+  "description": "Return your final result to the caller. This is the ONLY way to deliver your response — plain text is not delivered. Always use this tool when you are done.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -112,7 +112,7 @@ LLM에게 제공되는 `finish` 도구:
 
 LLM이 `finish`를 호출하지 않고 도구 호출 없이 텍스트만 응답한 경우:
 - 해당 텍스트를 context에 assistant 메시지로 추가
-- "`finish` 도구를 사용하라"는 안내를 user 메시지로 추가
+- "plain text는 전달되지 않았다, finish를 사용하라"는 안내를 user 메시지로 추가
 - 루프를 재시도하여 LLM이 `finish()`를 호출할 때까지 계속 유도
 - 재시도 횟수 제한 없음 — 철학에 따라 시스템 레벨 제한을 두지 않음
 
@@ -213,15 +213,16 @@ Available agents:
 - writer: 글을 잘 쓰는 작가.
 - reviewer: 품질 검토 전문가.
 
+IMPORTANT: You MUST call the finish tool to return your final result. Plain text responses are NOT delivered to the caller — only finish(message="...") will be received. Never respond with plain text when you are done.
 Use call_agent to delegate work to other agents.
-Always use the finish tool to return your final result to the caller.
 ```
 
 ### 포함되는 정보
 
 1. 에이전트 자신의 이름과 instructions
 2. 다른 에이전트 목록 (현재 에이전트 제외) — 이름과 instructions
-3. call_agent / finish 사용 안내
+3. finish 메커니즘 안내 (plain text 비전달 설명)
+4. call_agent 사용 안내
 
 ### 제외되는 정보
 
