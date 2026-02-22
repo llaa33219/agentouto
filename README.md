@@ -193,7 +193,6 @@ agent = Agent(
     instructions="Research expert.",
     model="gpt-5.2",
     provider="openai",
-    max_output_tokens=16384,
     reasoning=True,
     reasoning_effort="high",
     temperature=1.0,
@@ -206,7 +205,7 @@ agent = Agent(
 | `instructions` | Role description | (required) |
 | `model` | Model name | (required) |
 | `provider` | Provider name | (required) |
-| `max_output_tokens` | Max output tokens | `4096` |
+| `max_output_tokens` | Max output tokens | `None` (auto) |
 | `reasoning` | Enable reasoning/thinking mode | `False` |
 | `reasoning_effort` | Reasoning intensity | `"medium"` |
 | `reasoning_budget` | Thinking token budget (Anthropic) | `None` |
@@ -217,7 +216,7 @@ The SDK uses unified parameter names. Each provider backend maps them internally
 
 | SDK Parameter | OpenAI | Anthropic | Google Gemini |
 |---|---|---|---|
-| `max_output_tokens` | `max_completion_tokens` | `max_tokens` | `max_output_tokens` (in generation_config) |
+| `max_output_tokens` | `max_completion_tokens` (omitted when `None`) | `max_tokens` (auto-probed when `None`) | `max_output_tokens` (omitted when `None`) |
 | `reasoning=True` | sends `reasoning_effort` | `thinking={"type": "enabled", "budget_tokens": ...}` | `thinking_config={"thinking_budget": ...}` |
 | `reasoning_effort` | top-level `reasoning_effort` | N/A | N/A |
 | `reasoning_budget` | N/A | `thinking.budget_tokens` | `thinking_config.thinking_budget` |
@@ -429,6 +428,8 @@ agentouto/
 | **6** | CI/CD, tests, PyPI publish | ✅ Done |
 | **7** | Multimodal attachments (Attachment, ToolResult) | ✅ Done |
 | **8** | Rich parameter schemas (Annotated, Literal, Enum, default) | ✅ Done |
+| **9** | Reasoning tag handling (content preservation, detection prevention) | ✅ Done |
+| **10** | Auto max output tokens + safe JSON argument parsing | ✅ Done |
 
 ---
 

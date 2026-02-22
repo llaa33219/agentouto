@@ -23,8 +23,8 @@ agentouto/
 ├── tracing.py           # 호출 트레이싱 (Span, Trace)
 └── providers/
     ├── __init__.py      # ProviderBackend ABC, LLMResponse, get_backend()
-    ├── openai.py        # OpenAI 구현 (스트리밍 포함)
-    ├── anthropic.py     # Anthropic 구현
+    ├── openai.py        # OpenAI 구현 (스트리밍, 안전한 JSON 파싱 포함)
+    ├── anthropic.py     # Anthropic 구현 (auto max_tokens 탐색 포함)
     └── google.py        # Google Gemini 구현
 ```
 
@@ -65,7 +65,7 @@ class Agent:
     instructions: str       # 역할 설명 (필수)
     model: str              # 모델 이름 (필수)
     provider: str           # 프로바이더 이름 (필수)
-    max_output_tokens: int  # 최대 출력 토큰 (기본: 4096)
+    max_output_tokens: int | None  # 최대 출력 토큰 (기본: None → 자동 최대값)
     reasoning: bool         # 추론 모드 토글 (기본: False)
     reasoning_effort: str   # 추론 강도 (기본: "medium")
     reasoning_budget: int | None  # 추론 토큰 예산 (기본: None)
@@ -74,6 +74,10 @@ class Agent:
 ```
 
 순수 데이터 컨테이너. 로직 없음. `provider` 필드는 `Provider.name`과 매칭되는 문자열.
+
+`max_output_tokens`가 `None`이면 각 프로바이더가 자동으로 최대값을 사용한다:
+- **OpenAI/Google**: 파라미터 생략 → API가 모델 최대값 자동 적용
+- **Anthropic**: `max_tokens` 필수이므로 probe trick 사용 (상세: `PROVIDER_BACKENDS.md`)
 
 ### `provider.py` — Provider
 
@@ -360,6 +364,7 @@ async def async_run_stream(entry, message, agents, tools, providers, *, attachme
 class LLMResponse:
     content: str | None
     tool_calls: list[ToolCall]
+    content_without_reasoning -> str | None  # property: 추론 태그 제외 content
 
 class ProviderBackend(ABC):
     async def call(context, tools, agent, provider) -> LLMResponse
@@ -371,6 +376,11 @@ def get_backend(kind: str) -> ProviderBackend  # 팩토리 함수
 ```
 
 `get_backend`는 lazy import로 각 백엔드 모듈을 로드한다.
+
+**추론 태그 유틸리티:**
+- `_content_outside_reasoning(content)` — `<think>`, `<thinking>`, `<reason>`, `<reasoning>` 태그 내용을 제외한 텍스트 반환
+- `LLMResponse.content_without_reasoning` 속성 — 위 유틸리티를 사용한 편의 속성
+- 텍스트 기반 파싱 프로바이더는 도구 호출 파싱 전에 이 유틸리티로 추론 블록을 제외해야 함
 
 ---
 
@@ -454,7 +464,8 @@ Context (프로바이더 비의존)
 | `typing` | 전역 — 타입 힌팅 |
 | `dataclasses` | 데이터 클래스 정의 |
 | `abc` | `providers/__init__.py` — 추상 클래스 |
-| `logging` | `runtime.py` — 디버그 로그 |
+| `logging` | `runtime.py` — 디버그 로그, `providers/openai.py` — 파싱 경고, `providers/anthropic.py` — max_tokens 탐색 로그 |
+| `re` | `providers/__init__.py` — 추론 태그 정규식, `providers/anthropic.py` — 에러 메시지 파싱 |
 | `time` | `event_log.py` — 타임스탬프 |
 | `collections.abc` | `runtime.py`, `streaming.py`, `providers/` — AsyncIterator |
 

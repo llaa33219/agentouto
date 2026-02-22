@@ -10,7 +10,7 @@ class Agent:
     instructions: str
     model: str
     provider: str
-    max_output_tokens: int = 4096
+    max_output_tokens: int | None = None
     reasoning: bool = False
     reasoning_effort: str = "medium"
     reasoning_budget: int | None = None

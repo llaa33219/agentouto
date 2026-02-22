@@ -42,8 +42,9 @@ class GoogleBackend(ProviderBackend):
 
         gen_config: dict[str, Any] = {
             "temperature": agent.temperature,
-            "max_output_tokens": agent.max_output_tokens,
         }
+        if agent.max_output_tokens is not None:
+            gen_config["max_output_tokens"] = agent.max_output_tokens
         if agent.reasoning:
             gen_config["thinking_config"] = {
                 "thinking_budget": agent.reasoning_budget or 4096,

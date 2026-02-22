@@ -62,7 +62,7 @@ class Tool:  # @dataclass 아님
 
 ### 기본값
 
-- 불변 기본값: 직접 지정 (`max_output_tokens: int = 4096`)
+- 불변 기본값: 직접 지정 (`temperature: float = 1.0`)
 - 가변 기본값: `field(default_factory=...)` 사용 (`extra: dict[str, Any] = field(default_factory=dict)`)
 
 ---
@@ -197,6 +197,16 @@ class Router:
 
 - 키: `provider.kind`
 - Router에서 관리
+
+### 모델별 max_tokens 캐싱
+
+```python
+_max_tokens_cache: dict[str, int] = {}  # 모듈 레벨 딕셔너리
+```
+
+- 키: `agent.model`
+- Anthropic 백엔드에서 관리
+- probe 성공 시만 캐시 (네트워크/인증 에러 시 캐시 안 함)
 
 ---
 

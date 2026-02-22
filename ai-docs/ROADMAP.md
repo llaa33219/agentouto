@@ -8,9 +8,9 @@
 
 ## 1. 현재 상태
 
-**버전:** 0.2.0 (공개)
+**버전:** 0.5.0 (공개)
 
-**최종 업데이트:** Phase 7 완료 — 멀티모달 첨부파일 지원
+**최종 업데이트:** Phase 10 완료 — 자동 최대 출력 토큰 + 안전한 JSON 파싱
 
 ---
 
@@ -93,6 +93,33 @@
 - [x] 74개 테스트 (Attachment, ToolResult, 첨부파일 전달 테스트 포함)
 - [x] 하위 호환성 100% 보장 — 모든 새 파라미터 기본값 None
 
+### Phase 8: 리치 파라미터 스키마 ✅
+
+- [x] `Annotated[T, "설명"]` → JSON Schema `description` 지원
+- [x] `Literal["a", "b"]` → `enum` 지원
+- [x] `enum.Enum` 서브클래스 → `enum` 지원
+- [x] 기본값 → `default` 필드 + `required`에서 제외
+- [x] 87개 테스트 (+15개)
+
+### Phase 9: 추론 태그 처리 ✅
+
+- [x] `providers/__init__.py`: `_content_outside_reasoning()` 유틸리티 추가
+- [x] `LLMResponse.content_without_reasoning` 속성 추가
+- [x] 추론 태그 내 도구 호출 감지 방지 인프라 구축
+- [x] context.py에서 assistant content 원본 그대로 보존
+- [x] 111개 테스트
+
+### Phase 10: 자동 최대 출력 토큰 + 안전한 JSON 파싱 ✅
+
+- [x] `agent.py`: `max_output_tokens` 기본값 `4096` → `None` (자동 최대값)
+- [x] OpenAI/Google: `None`이면 max tokens 파라미터 생략 → API 자동 최대값
+- [x] Anthropic: probe trick으로 최대값 자동 탐색 (`_PROBE_MAX_TOKENS = 999_999_999`)
+- [x] `_parse_max_tokens_from_error()` + 모델별 캐시
+- [x] OpenAI: `{"raw": ...}` 폴백 제거 → `_parse_tool_arguments()` 대체
+- [x] `_repair_incomplete_json()` — 토큰 제한으로 잘린 JSON 복구
+- [x] 마크다운 코드펜스 자동 제거
+- [x] 141개 테스트
+
 ---
 
 ## 3. 미구현 기능
@@ -114,12 +141,37 @@
 | 무한 루프 방지 없음 | 낮음 (설계 의도) | 시스템 레벨 제한 없음. instructions로만 제어. 철학적 결정. |
 | 스트리밍은 OpenAI만 네이티브 | 낮음 | Anthropic, Google은 fallback (non-streaming 후 단일 이벤트) |
 | 멀티모달 프로바이더별 지원 범위 | 낮음 | OpenAI: image/audio, Anthropic: image/PDF, Google: 모든 타입. 미지원 타입은 조용히 무시 |
+| Anthropic max_tokens probe 레이스 컨디션 | 낮음 | 동일 모델 동시 호출 시 여러 번 probe 가능. 첫 성공 후 캐시 |
 
 ---
 
 ## 5. 변경 이력
 
-### 0.2.1 (Phase 7: 멀티모달)
+### 0.5.0 (Phase 9–10)
+
+- Phase 9 완료: 추론 태그 처리
+  - `providers/__init__.py`: `_content_outside_reasoning()` 유틸리티 추가
+  - `LLMResponse.content_without_reasoning` 속성 추가
+  - 추론 태그(`<think>`, `<thinking>`, `<reason>`, `<reasoning>`) 내 도구 호출 감지 방지
+  - context.py에서 assistant content 원본 보존
+- Phase 10 완료: 자동 최대 출력 토큰 + 안전한 JSON 파싱
+  - `agent.py`: `max_output_tokens` 기본값 `4096` → `None`
+  - OpenAI/Google: `None`이면 max tokens 파라미터 생략
+  - Anthropic: probe trick (`_PROBE_MAX_TOKENS = 999_999_999`) + `_parse_max_tokens_from_error()` + 모델별 캐시
+  - OpenAI: `{"raw": ...}` 폴백 → `_parse_tool_arguments()` + `_repair_incomplete_json()` 대체
+- 테스트 87개 → 141개
+- ai-docs 업데이트
+
+### 0.4.0 (Phase 8: 리치 파라미터 스키마)
+
+- Phase 8 완료: 리치 파라미터 스키마
+  - `Annotated[T, "설명"]` → JSON Schema `description`
+  - `Literal["a", "b"]` → `enum`
+  - `enum.Enum` 서브클래스 → `enum`
+  - 기본값 → `default` 필드 + `required`에서 제외
+- 테스트 74개 → 87개
+
+### 0.3.0 (Phase 7: 멀티모달)
 
 - Phase 7 완료: 멀티모달 첨부파일 지원
 - 새 데이터클래스: `Attachment` (context.py), `ToolResult` (tool.py)

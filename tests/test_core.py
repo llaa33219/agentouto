@@ -10,6 +10,8 @@ from agentouto.context import Attachment, Context, ContextMessage, ToolCall
 from agentouto.message import Message
 from agentouto.provider import Provider
 from agentouto.providers import LLMResponse, _content_outside_reasoning
+from agentouto.providers.anthropic import _parse_max_tokens_from_error
+from agentouto.providers.openai import _parse_tool_arguments
 from agentouto.tool import Tool, ToolResult
 
 
@@ -61,7 +63,7 @@ class TestAgent:
         assert a.instructions == "do stuff"
         assert a.model == "gpt-4o"
         assert a.provider == "openai"
-        assert a.max_output_tokens == 4096
+        assert a.max_output_tokens is None
         assert a.reasoning is False
         assert a.reasoning_effort == "medium"
         assert a.reasoning_budget is None
@@ -497,6 +499,120 @@ class TestLLMResponseContentWithoutReasoning:
     def test_only_reasoning_returns_none(self) -> None:
         resp = LLMResponse(content="<think>all reasoning</think>")
         assert resp.content_without_reasoning is None
+
+
+# --- Tool Argument Parsing ---
+
+
+class TestParseToolArguments:
+    def test_valid_json_object(self) -> None:
+        assert _parse_tool_arguments('{"query": "AI"}') == {"query": "AI"}
+
+    def test_valid_nested_object(self) -> None:
+        raw = '{"query": "AI", "options": {"limit": 10}}'
+        assert _parse_tool_arguments(raw) == {"query": "AI", "options": {"limit": 10}}
+
+    def test_none_returns_empty(self) -> None:
+        assert _parse_tool_arguments(None) == {}
+
+    def test_empty_string_returns_empty(self) -> None:
+        assert _parse_tool_arguments("") == {}
+
+    def test_whitespace_only_returns_empty(self) -> None:
+        assert _parse_tool_arguments("   \n\t  ") == {}
+
+    def test_markdown_code_fence_json(self) -> None:
+        raw = '```json\n{"query": "test"}\n```'
+        assert _parse_tool_arguments(raw) == {"query": "test"}
+
+    def test_markdown_code_fence_plain(self) -> None:
+        raw = '```\n{"query": "test"}\n```'
+        assert _parse_tool_arguments(raw) == {"query": "test"}
+
+    def test_markdown_fence_with_extra_whitespace(self) -> None:
+        raw = '```json\n  {"query": "test"}  \n```'
+        assert _parse_tool_arguments(raw) == {"query": "test"}
+
+    def test_markdown_fence_empty_body(self) -> None:
+        assert _parse_tool_arguments('```json\n\n```') == {}
+
+    def test_number_string_returns_empty(self) -> None:
+        assert _parse_tool_arguments("42") == {}
+
+    def test_json_array_returns_empty(self) -> None:
+        assert _parse_tool_arguments('["a", "b"]') == {}
+
+    def test_json_string_returns_empty(self) -> None:
+        assert _parse_tool_arguments('"just a string"') == {}
+
+    def test_json_boolean_returns_empty(self) -> None:
+        assert _parse_tool_arguments("true") == {}
+
+    def test_json_null_returns_empty(self) -> None:
+        assert _parse_tool_arguments("null") == {}
+
+    def test_malformed_json_returns_empty(self) -> None:
+        assert _parse_tool_arguments('{"query": "test",}') == {}
+
+    def test_truncated_json_repaired(self) -> None:
+        assert _parse_tool_arguments('{"query": "te') == {"query": "te"}
+
+    def test_plain_text_returns_empty(self) -> None:
+        assert _parse_tool_arguments("not json at all") == {}
+
+    def test_surrounding_whitespace_stripped(self) -> None:
+        assert _parse_tool_arguments('  {"key": "val"}  ') == {"key": "val"}
+
+    def test_no_raw_key_in_result(self) -> None:
+        result = _parse_tool_arguments("invalid json!!!")
+        assert "raw" not in result
+
+    def test_incomplete_json_missing_brace(self) -> None:
+        assert _parse_tool_arguments('{"query": "test"') == {"query": "test"}
+
+    def test_incomplete_json_nested(self) -> None:
+        raw = '{"query": "AI", "options": {"limit": 10}'
+        assert _parse_tool_arguments(raw) == {"query": "AI", "options": {"limit": 10}}
+
+    def test_incomplete_json_with_array(self) -> None:
+        raw = '{"tags": ["a", "b"'
+        assert _parse_tool_arguments(raw) == {"tags": ["a", "b"]}
+
+    def test_incomplete_json_truncated_string(self) -> None:
+        raw = '{"query": "hello wor'
+        result = _parse_tool_arguments(raw)
+        assert result.get("query", "").startswith("hello wor")
+
+    def test_incomplete_json_completely_broken(self) -> None:
+        assert _parse_tool_arguments('{"query":') == {}
+
+
+# --- Anthropic Max Tokens Discovery ---
+
+
+class TestParseMaxTokensFromError:
+    def test_standard_format(self) -> None:
+        msg = "max_tokens: 999999 > 64000, which is the maximum allowed number of output tokens for claude-sonnet-4-5-20250929"
+        assert _parse_max_tokens_from_error(msg) == 64000
+
+    def test_opus_format(self) -> None:
+        msg = "max_tokens: 21333 > 4096, which is the maximum allowed number of output tokens for claude-3-opus-20240229"
+        assert _parse_max_tokens_from_error(msg) == 4096
+
+    def test_fallback_regex(self) -> None:
+        msg = "Your requested 'max_tokens' value is too large. The maximum value for model 'claude-3-5-sonnet-20240620' is 8192."
+        assert _parse_max_tokens_from_error(msg) == 8192
+
+    def test_no_match(self) -> None:
+        msg = "Connection refused"
+        assert _parse_max_tokens_from_error(msg) is None
+
+    def test_empty_string(self) -> None:
+        assert _parse_max_tokens_from_error("") is None
+
+    def test_wrapped_error_json(self) -> None:
+        msg = '{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 999999 > 16384, which is the maximum allowed number of output tokens for claude-3-haiku-20240307"}}'
+        assert _parse_max_tokens_from_error(msg) == 16384
 
 
 # --- Attachment ---

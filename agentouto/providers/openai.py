@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -11,6 +12,8 @@ from agentouto.context import Attachment, Context, ToolCall
 from agentouto.exceptions import ProviderError
 from agentouto.provider import Provider
 from agentouto.providers import LLMResponse, ProviderBackend
+
+logger = logging.getLogger("agentouto")
 
 
 class OpenAIBackend(ProviderBackend):
@@ -40,9 +43,10 @@ class OpenAIBackend(ProviderBackend):
         params: dict[str, Any] = {
             "model": agent.model,
             "messages": messages,
-            "max_completion_tokens": agent.max_output_tokens,
             **agent.extra,
         }
+        if agent.max_output_tokens is not None:
+            params["max_completion_tokens"] = agent.max_output_tokens
         if openai_tools:
             params["tools"] = openai_tools
         if agent.reasoning:
@@ -63,15 +67,11 @@ class OpenAIBackend(ProviderBackend):
         parsed_calls: list[ToolCall] = []
         if msg.tool_calls:
             for tc in msg.tool_calls:
-                try:
-                    arguments = json.loads(tc.function.arguments)
-                except (json.JSONDecodeError, TypeError):
-                    arguments = {"raw": tc.function.arguments}
                 parsed_calls.append(
                     ToolCall(
                         id=tc.id,
                         name=tc.function.name,
-                        arguments=arguments,
+                        arguments=_parse_tool_arguments(tc.function.arguments),
                     )
                 )
 
@@ -92,10 +92,11 @@ class OpenAIBackend(ProviderBackend):
         params: dict[str, Any] = {
             "model": agent.model,
             "messages": messages,
-            "max_completion_tokens": agent.max_output_tokens,
             "stream": True,
             **agent.extra,
         }
+        if agent.max_output_tokens is not None:
+            params["max_completion_tokens"] = agent.max_output_tokens
         if openai_tools:
             params["tools"] = openai_tools
         if agent.reasoning:
@@ -142,12 +143,12 @@ class OpenAIBackend(ProviderBackend):
         parsed_calls: list[ToolCall] = []
         for idx in sorted(accumulated_tool_calls):
             tc = accumulated_tool_calls[idx]
-            try:
-                arguments = json.loads(tc["arguments"])
-            except (json.JSONDecodeError, TypeError):
-                arguments = {"raw": tc["arguments"]}
             parsed_calls.append(
-                ToolCall(id=tc["id"], name=tc["name"], arguments=arguments)
+                ToolCall(
+                    id=tc["id"],
+                    name=tc["name"],
+                    arguments=_parse_tool_arguments(tc["arguments"]),
+                )
             )
 
         yield LLMResponse(
@@ -222,3 +223,76 @@ def _build_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
     if not tools:
         return None
     return [{"type": "function", "function": t} for t in tools]
+
+
+def _parse_tool_arguments(raw: str | None) -> dict[str, Any]:
+    """Parse JSON tool-call arguments, repairing common LLM formatting issues.
+
+    Always returns a ``dict``.  When the raw string is malformed or not a JSON
+    object, an empty dict is returned so that the tool fails with a clear error
+    about missing arguments rather than propagating an opaque ``{"raw": ...}``
+    wrapper that poisons the conversation history.
+    """
+    if not raw or not raw.strip():
+        return {}
+
+    text = raw.strip()
+
+    # Strip markdown code fences:  ```json\n...\n```  or  ```\n...\n```
+    if text.startswith("```"):
+        first_nl = text.find("\n")
+        if first_nl != -1:
+            text = text[first_nl + 1:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        if not text:
+            return {}
+
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        repaired = _repair_incomplete_json(text)
+        if repaired is not None:
+            try:
+                parsed = json.loads(repaired)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                parsed = None
+        else:
+            parsed = None
+        if not isinstance(parsed, dict):
+            logger.warning("Malformed tool arguments: %.200s", raw)
+            return {}
+        return parsed
+
+    if isinstance(parsed, dict):
+        return parsed
+
+    logger.warning(
+        "Tool arguments parsed to %s instead of dict: %.200s",
+        type(parsed).__name__,
+        raw,
+    )
+    return {}
+
+
+def _repair_incomplete_json(text: str) -> str | None:
+    """Try to repair truncated JSON by appending missing closing brackets."""
+    open_braces = text.count("{") - text.count("}")
+    open_brackets = text.count("[") - text.count("]")
+    if open_braces <= 0 and open_brackets <= 0:
+        return None
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+    if in_string:
+        text += '"'
+    return text + "]" * open_brackets + "}" * open_braces
