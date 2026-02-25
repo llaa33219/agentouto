@@ -536,3 +536,281 @@ class TestMessagesAlwaysPopulated:
         assert len(result.messages) >= 2
         assert result.messages[0].type == "forward"
         assert result.messages[-1].type == "return"
+
+
+class TestToolCallErrorHandling:
+    """Errors from confused or invalid tool/agent calls are caught, not crashed."""
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_error_no_crash(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        mock = MockBackend([
+            _tool_call("nonexistent", "tc1"),
+            _finish("ok"),
+        ])
+        with patch("agentouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Use nonexistent tool",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "ok"
+
+    @pytest.mark.asyncio
+    async def test_agent_as_tool_error_message(
+        self,
+        agent_a: Agent,
+        agent_b: Agent,
+        provider: Provider,
+        search_tool: Tool,
+    ) -> None:
+        """Calling an agent name as a tool gives a helpful error."""
+        contexts_seen: list[Context] = []
+
+        class CapturingBackend(ProviderBackend):
+            def __init__(self) -> None:
+                self._call_count = 0
+
+            async def call(
+                self, context: Context, tools: list[dict[str, Any]],
+                agent: Agent, provider: Provider,
+            ) -> LLMResponse:
+                self._call_count += 1
+                if self._call_count == 1:
+                    return _tool_call("agent_b", "tc1")
+                contexts_seen.append(context)
+                return _finish("ok")
+
+        mock = CapturingBackend()
+        with patch("agentouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Call agent_b as tool",
+                agents=[agent_a, agent_b],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "ok"
+        error_msg = contexts_seen[0].messages[-1].content or ""
+        assert "is an agent, not a tool" in error_msg
+        assert "call_agent" in error_msg
+
+    @pytest.mark.asyncio
+    async def test_tool_as_agent_error_message(
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
+    ) -> None:
+        """Calling a tool name via call_agent gives a helpful error."""
+        contexts_seen: list[Context] = []
+
+        class CapturingBackend(ProviderBackend):
+            def __init__(self) -> None:
+                self._call_count = 0
+
+            async def call(
+                self, context: Context, tools: list[dict[str, Any]],
+                agent: Agent, provider: Provider,
+            ) -> LLMResponse:
+                self._call_count += 1
+                if self._call_count == 1:
+                    return _call_agent("search", "find something")
+                contexts_seen.append(context)
+                return _finish("ok")
+
+        mock = CapturingBackend()
+        with patch("agentouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Call search as agent",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "ok"
+        error_msg = contexts_seen[0].messages[-1].content or ""
+        assert "is a tool, not an agent" in error_msg
+
+    @pytest.mark.asyncio
+    async def test_unknown_agent_error_message(
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
+    ) -> None:
+        """Calling a completely unknown agent name gives available agents."""
+        contexts_seen: list[Context] = []
+
+        class CapturingBackend(ProviderBackend):
+            def __init__(self) -> None:
+                self._call_count = 0
+
+            async def call(
+                self, context: Context, tools: list[dict[str, Any]],
+                agent: Agent, provider: Provider,
+            ) -> LLMResponse:
+                self._call_count += 1
+                if self._call_count == 1:
+                    return _call_agent("nobody", "hi")
+                contexts_seen.append(context)
+                return _finish("ok")
+
+        mock = CapturingBackend()
+        with patch("agentouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Call unknown agent",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "ok"
+        error_msg = contexts_seen[0].messages[-1].content or ""
+        assert "Unknown agent" in error_msg
+        assert "Available agents" in error_msg
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_error_lists_available(
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
+    ) -> None:
+        """Calling a completely unknown tool name gives available tools."""
+        contexts_seen: list[Context] = []
+
+        class CapturingBackend(ProviderBackend):
+            def __init__(self) -> None:
+                self._call_count = 0
+
+            async def call(
+                self, context: Context, tools: list[dict[str, Any]],
+                agent: Agent, provider: Provider,
+            ) -> LLMResponse:
+                self._call_count += 1
+                if self._call_count == 1:
+                    return _tool_call("nonexistent", "tc1")
+                contexts_seen.append(context)
+                return _finish("ok")
+
+        mock = CapturingBackend()
+        with patch("agentouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                entry=agent_a,
+                message="Use nonexistent tool",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "ok"
+        error_msg = contexts_seen[0].messages[-1].content or ""
+        assert "Unknown tool" in error_msg
+        assert "Available tools" in error_msg
+
+
+class TestStreamingErrorHandling:
+    """Streaming path handles invalid tool/agent calls without crashing."""
+
+    @pytest.mark.asyncio
+    async def test_stream_unknown_tool_no_crash(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        from agentouto.streaming import StreamEvent, async_run_stream
+
+        mock = MockBackend([
+            _tool_call("nonexistent", "tc1"),
+            _finish("ok"),
+        ])
+        with patch("agentouto.router.get_backend", return_value=mock):
+            events: list[StreamEvent] = []
+            async for event in async_run_stream(
+                entry=agent_a,
+                message="Use nonexistent",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            ):
+                events.append(event)
+        finish_events = [e for e in events if e.type == "finish"]
+        assert len(finish_events) == 1
+        assert finish_events[0].data["output"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_stream_agent_as_tool_no_crash(
+        self,
+        agent_a: Agent,
+        agent_b: Agent,
+        provider: Provider,
+        search_tool: Tool,
+    ) -> None:
+        from agentouto.streaming import StreamEvent, async_run_stream
+
+        mock = MockBackend([
+            _tool_call("agent_b", "tc1"),
+            _finish("ok"),
+        ])
+        with patch("agentouto.router.get_backend", return_value=mock):
+            events: list[StreamEvent] = []
+            async for event in async_run_stream(
+                entry=agent_a,
+                message="Call agent_b as tool",
+                agents=[agent_a, agent_b],
+                tools=[search_tool],
+                providers=[provider],
+            ):
+                events.append(event)
+        finish_events = [e for e in events if e.type == "finish"]
+        assert len(finish_events) == 1
+        assert finish_events[0].data["output"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_stream_tool_as_agent_no_crash(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        from agentouto.streaming import StreamEvent, async_run_stream
+
+        mock = MockBackend([
+            _call_agent("search", "find something"),
+            _finish("ok"),
+        ])
+        with patch("agentouto.router.get_backend", return_value=mock):
+            events: list[StreamEvent] = []
+            async for event in async_run_stream(
+                entry=agent_a,
+                message="Call search as agent",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            ):
+                events.append(event)
+        finish_events = [e for e in events if e.type == "finish"]
+        assert len(finish_events) == 1
+        assert finish_events[0].data["output"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_stream_unknown_agent_no_crash(
+        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+    ) -> None:
+        from agentouto.streaming import StreamEvent, async_run_stream
+
+        mock = MockBackend([
+            _call_agent("nobody", "hi"),
+            _finish("ok"),
+        ])
+        with patch("agentouto.router.get_backend", return_value=mock):
+            events: list[StreamEvent] = []
+            async for event in async_run_stream(
+                entry=agent_a,
+                message="Call unknown agent",
+                agents=[agent_a],
+                tools=[search_tool],
+                providers=[provider],
+            ):
+                events.append(event)
+        finish_events = [e for e in events if e.type == "finish"]
+        assert len(finish_events) == 1
+        assert finish_events[0].data["output"] == "ok"

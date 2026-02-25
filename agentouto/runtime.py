@@ -11,7 +11,7 @@ from agentouto._constants import CALL_AGENT, FINISH
 from agentouto.agent import Agent
 from agentouto.context import Attachment, Context, ToolCall
 from agentouto.event_log import AgentEvent, EventLog
-from agentouto.exceptions import ToolError
+from agentouto.exceptions import RoutingError, ToolError
 from agentouto.message import Message
 from agentouto.provider import Provider
 from agentouto.router import Router
@@ -165,13 +165,43 @@ class Runtime:
                 else:
                     context.add_tool_result(tc.id, tc.name, result)
 
+    def _resolve_agent_target(self, agent_name: str) -> Agent:
+        if agent_name in self._router.tool_names:
+            raise RoutingError(
+                f"'{agent_name}' is a tool, not an agent. "
+                f"Call it directly as {agent_name}(...) instead of using call_agent."
+            )
+        if agent_name not in self._router.agent_names:
+            available = ", ".join(self._router.agent_names) or "(none)"
+            raise RoutingError(
+                f"Unknown agent: '{agent_name}'. "
+                f"Available agents: {available}"
+            )
+        return self._router.get_agent(agent_name)
+
+    def _resolve_tool_target(self, tool_name: str) -> Tool:
+        if tool_name in self._router.agent_names:
+            raise ToolError(
+                tool_name,
+                f"'{tool_name}' is an agent, not a tool. "
+                f'Use call_agent(agent_name="{tool_name}", message="...") to call it.'
+            )
+        if tool_name not in self._router.tool_names:
+            available = ", ".join(self._router.tool_names) or "(none)"
+            raise ToolError(
+                tool_name,
+                f"Unknown tool: '{tool_name}'. "
+                f"Available tools: {available}"
+            )
+        return self._router.get_tool(tool_name)
+
     async def _execute_tool_call(
         self, tc: ToolCall, caller_name: str, caller_call_id: str
     ) -> str | ToolResult:
         if tc.name == CALL_AGENT:
             agent_name = tc.arguments.get("agent_name", "")
             message = tc.arguments.get("message", "")
-            target = self._router.get_agent(agent_name)
+            target = self._resolve_agent_target(agent_name)
 
             sub_call_id = uuid.uuid4().hex
             self._messages.append(
@@ -210,7 +240,7 @@ class Runtime:
             "tool_name": tc.name,
             "arguments": tc.arguments,
         })
-        tool = self._router.get_tool(tc.name)
+        tool = self._resolve_tool_target(tc.name)
         try:
             return await tool.execute(**tc.arguments)
         except Exception as exc:
@@ -319,49 +349,60 @@ class Runtime:
                 if tc.name == CALL_AGENT:
                     target_name = tc.arguments.get("agent_name", "")
                     msg = tc.arguments.get("message", "")
-                    target = self._router.get_agent(target_name)
+                    try:
+                        target = self._resolve_agent_target(target_name)
+                    except Exception as exc:
+                        context.add_tool_result(tc.id, tc.name, f"Error: {exc}")
+                        continue
 
-                    sub_call_id = uuid.uuid4().hex
-                    self._messages.append(
-                        Message(
-                            type="forward",
-                            sender=agent.name,
-                            receiver=target_name,
-                            content=msg,
-                            call_id=sub_call_id,
+                    try:
+                        sub_call_id = uuid.uuid4().hex
+                        self._messages.append(
+                            Message(
+                                type="forward",
+                                sender=agent.name,
+                                receiver=target_name,
+                                content=msg,
+                                call_id=sub_call_id,
+                            )
                         )
-                    )
-                    yield StreamEvent(
-                        type="agent_call",
-                        agent_name=target_name,
-                        data={"from": agent.name, "message": _truncate(msg)},
-                    )
-
-                    sub_result = ""
-                    async for sub_event in self._stream_agent_loop(
-                        target, msg, sub_call_id, call_id
-                    ):
-                        yield sub_event
-                        if sub_event.type == "finish":
-                            sub_result = sub_event.data.get("output", "")
-
-                    self._messages.append(
-                        Message(
-                            type="return",
-                            sender=target_name,
-                            receiver=agent.name,
-                            content=sub_result,
-                            call_id=sub_call_id,
+                        yield StreamEvent(
+                            type="agent_call",
+                            agent_name=target_name,
+                            data={"from": agent.name, "message": _truncate(msg)},
                         )
-                    )
-                    yield StreamEvent(
-                        type="agent_return",
-                        agent_name=target_name,
-                        data={"result": _truncate(sub_result)},
-                    )
-                    context.add_tool_result(tc.id, tc.name, sub_result)
+
+                        sub_result = ""
+                        async for sub_event in self._stream_agent_loop(
+                            target, msg, sub_call_id, call_id
+                        ):
+                            yield sub_event
+                            if sub_event.type == "finish":
+                                sub_result = sub_event.data.get("output", "")
+
+                        self._messages.append(
+                            Message(
+                                type="return",
+                                sender=target_name,
+                                receiver=agent.name,
+                                content=sub_result,
+                                call_id=sub_call_id,
+                            )
+                        )
+                        yield StreamEvent(
+                            type="agent_return",
+                            agent_name=target_name,
+                            data={"result": _truncate(sub_result)},
+                        )
+                        context.add_tool_result(tc.id, tc.name, sub_result)
+                    except Exception as exc:
+                        context.add_tool_result(tc.id, tc.name, f"Error: {exc}")
                 else:
-                    tool = self._router.get_tool(tc.name)
+                    try:
+                        tool = self._resolve_tool_target(tc.name)
+                    except Exception as exc:
+                        context.add_tool_result(tc.id, tc.name, f"Error: {exc}")
+                        continue
                     yield StreamEvent(
                         type="tool_call",
                         agent_name=agent.name,

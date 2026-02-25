@@ -245,15 +245,22 @@ class Runtime:
    f. 다음 반복
 
 **도구 실행 (`_execute_tool_call`):**
-- `call_agent` → 대상 에이전트의 `_run_agent_loop` 재귀 호출 (sub_call_id 생성, Message 추적)
-- 일반 도구 → `tool.execute(**kwargs)` 실행 → `str | ToolResult` 반환, 에러 시 `ToolError` 래핑
+- `call_agent` → `_resolve_agent_target()`으로 대상 검증 후 `_run_agent_loop` 재귀 호출 (sub_call_id 생성, Message 추적)
+- 일반 도구 → `_resolve_tool_target()`으로 도구 검증 후 `tool.execute(**kwargs)` 실행 → `str | ToolResult` 반환, 에러 시 `ToolError` 래핑
 - `ToolResult` 반환 시 `content`와 `attachments`를 분리하여 context에 추가
+
+**에이전트/도구 혼동 감지 (`_resolve_agent_target` / `_resolve_tool_target`):**
+- LLM이 도구 이름을 에이전트로 호출 시 → 도구임을 알려주는 에러 메시지 반환
+- LLM이 에이전트 이름을 도구로 호출 시 → `call_agent` 사용을 안내하는 에러 메시지 반환
+- 존재하지 않는 이름 호출 시 → 사용 가능한 에이전트/도구 목록 포함 에러 메시지 반환
+- 에러는 크래시 대신 도구 결과로 LLM에 전달되어 자기 수정 가능
 
 **스트리밍 (`execute_stream` / `_stream_agent_loop`):**
 - `Router.stream_llm()`을 통해 LLM 스트리밍 호출
-- 텍스트 청크는 `StreamEvent(type="token")`로 즐시 yield
+- 텍스트 청크는 `StreamEvent(type="token")`로 즉시 yield
 - 도구 호출, 에이전트 호출, 완료도 각각 StreamEvent로 yield
 - 내부 에이전트 호출은 재귀적으로 sub-stream 생성
+- 도구/에이전트 해석 및 실행 에러는 try/except로 잡아 도구 결과로 전환 (크래시 방지)
 
 **`run()` / `async_run()`:**
 - Router 생성 → Runtime 생성 → execute 호출 → RunResult 반환

@@ -8,9 +8,9 @@
 
 ## 1. 현재 상태
 
-**버전:** 0.10.0 (공개)
+**버전:** 0.10.1 (공개)
 
-**최종 업데이트:** Phase 13 완료 — OpenAI Responses API 백엔드
+**최종 업데이트:** Phase 14 완료 — 에이전트/도구 혼동 에러 핸들링
 
 ---
 
@@ -138,6 +138,17 @@
 - [x] 경고 로그 출력 (LLM이 finish 사용 안 할 때)
 - [x] 143개 테스트 (스트리밍 nudge 테스트 포함)
 
+### Phase 14: 에이전트/도구 혼동 에러 핸들링 ✅
+
+- [x] `_resolve_agent_target()` — 에이전트 호출 시 도구/에이전트 혼동 감지 + 존재하지 않는 이름에 사용 가능 목록 포함
+- [x] `_resolve_tool_target()` — 도구 호출 시 에이전트/도구 혼동 감지 + 존재하지 않는 이름에 사용 가능 목록 포함
+- [x] `_execute_tool_call` — 혼동 감지 헬퍼 사용으로 개선된 에러 메시지 (비스트리밍)
+- [x] `_stream_agent_loop` — 에이전트/도구 해석 및 서브 에이전트 실행 에러를 try/except로 크래시 방지 (스트리밍)
+- [x] 에러가 도구 결과로 LLM에 전달 → LLM이 자기 수정 가능
+- [x] 9개 신규 테스트 (비스트리밍 5개 + 스트리밍 4개)
+- [x] 153개 테스트, mypy clean
+- [x] ai-docs 업데이트 (ARCHITECTURE, ROADMAP)
+
 ### Phase 13: OpenAI Responses API 백엔드 ✅
 
 - [x] `providers/openai_responses.py` 신규 생성 — `OpenAIResponsesBackend` 클래스
@@ -181,6 +192,16 @@
 ---
 
 ## 5. 변경 이력
+
+### 0.10.1 (Phase 14: 에이전트/도구 혼동 에러 핸들링)
+
+- runtime.py: `_resolve_agent_target()` / `_resolve_tool_target()` DRY 헬퍼 추가
+- 에이전트/도구 혼동 감지 — 도구를 에이전트로 호출하거나 에이전트를 도구로 호출 시 안내 에러 메시지
+- 존재하지 않는 이름 호출 시 사용 가능한 에이전트/도구 목록 포함
+- `_stream_agent_loop` — 에이전트/도구 해석 + 서브 에이전트 실행 try/except 크래시 방지
+- 에러는 크래시 대신 도구 결과로 LLM에 전달 → 자기 수정 가능
+- 테스트 144개 → 153개 (+9개: 비스트리밍 5 + 스트리밍 4)
+- ai-docs 업데이트 (ARCHITECTURE, ROADMAP)
 
 ### 0.10.0 (Phase 13: OpenAI Responses API 백엔드)
 
