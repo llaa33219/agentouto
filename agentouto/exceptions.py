@@ -34,3 +34,11 @@ class RoutingError(AgentOutOError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class AuthError(AgentOutOError):
+    """Raised when authentication fails (e.g. OAuth token refresh failure)."""
+
+    def __init__(self, provider_name: str, message: str) -> None:
+        self.provider_name = provider_name
+        super().__init__(f"[{provider_name}] {message}")

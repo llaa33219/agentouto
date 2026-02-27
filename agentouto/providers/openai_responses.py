@@ -19,15 +19,15 @@ logger = logging.getLogger("agentouto")
 
 class OpenAIResponsesBackend(ProviderBackend):
     def __init__(self) -> None:
-        self._clients: dict[str, AsyncOpenAI] = {}
+        self._clients: dict[str, tuple[str, AsyncOpenAI]] = {}
 
-    def _get_client(self, provider: Provider) -> AsyncOpenAI:
-        if provider.name not in self._clients:
-            self._clients[provider.name] = AsyncOpenAI(
-                api_key=provider.api_key,
-                base_url=provider.base_url,
-            )
-        return self._clients[provider.name]
+    def _get_client(self, provider: Provider, api_key: str) -> AsyncOpenAI:
+        cached = self._clients.get(provider.name)
+        if cached is not None and cached[0] == api_key:
+            return cached[1]
+        client = AsyncOpenAI(api_key=api_key, base_url=provider.base_url)
+        self._clients[provider.name] = (api_key, client)
+        return client
 
     async def call(
         self,
@@ -36,7 +36,8 @@ class OpenAIResponsesBackend(ProviderBackend):
         agent: Agent,
         provider: Provider,
     ) -> LLMResponse:
-        client = self._get_client(provider)
+        api_key = await provider.resolve_api_key()
+        client = self._get_client(provider, api_key)
 
         input_items = _build_input(context)
         response_tools = _build_tools(tools)
@@ -70,7 +71,8 @@ class OpenAIResponsesBackend(ProviderBackend):
         agent: Agent,
         provider: Provider,
     ) -> AsyncIterator[str | LLMResponse]:
-        client = self._get_client(provider)
+        api_key = await provider.resolve_api_key()
+        client = self._get_client(provider, api_key)
 
         input_items = _build_input(context)
         response_tools = _build_tools(tools)

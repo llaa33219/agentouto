@@ -8,9 +8,9 @@
 
 ## 1. 현재 상태
 
-**버전:** 0.10.1 (공개)
+**버전:** 0.11.0 (공개)
 
-**최종 업데이트:** Phase 14 완료 — 에이전트/도구 혼동 에러 핸들링
+**최종 업데이트:** Phase 15 완료 — OAuth 인증 (OpenAI, Claude, Google)
 
 ---
 
@@ -149,6 +149,25 @@
 - [x] 153개 테스트, mypy clean
 - [x] ai-docs 업데이트 (ARCHITECTURE, ROADMAP)
 
+### Phase 15: OAuth 인증 ✅
+
+- [x] `auth/` 모듈 신규 생성 (7개 파일)
+- [x] `AuthMethod` ABC — `get_token()`, `ensure_authenticated()`, `is_authenticated`
+- [x] `TokenData` 데이터클래스 — access_token, refresh_token, expires_at, scopes, extra
+- [x] `TokenStore` — `~/.agentouto/tokens/` 토큰 영속 저장 (파일: `0o600`, 디렉토리: `0o700`)
+- [x] `ApiKeyAuth` — 정적 API 키 래퍼 (하위 호환)
+- [x] `OpenAIOAuth` — OpenAI OAuth 2.0 + PKCE (✅ 활성 상태)
+- [x] `ClaudeOAuth` — Anthropic Claude OAuth (⚠️ TOS 제한, 기본 client_id 주석 처리)
+- [x] `GoogleOAuth` — Google Gemini/Antigravity OAuth (⚠️ TOS 제한, 기본 client_id 주석 처리)
+- [x] `_oauth_common.py` — PKCE, 로컬 콜백 서버, 브라우저 인증, 토큰 교환 (`aiohttp` lazy import)
+- [x] `Provider.auth` 필드 추가 + `resolve_api_key()` async 메서드
+- [x] 4개 백엔드 모두 `provider.resolve_api_key()` 사용 + 토큰 로테이션 캐시 (`(api_key, client)` 튜플)
+- [x] `AuthError` 예외 추가
+- [x] `aiohttp` 선택적 의존성 (`pip install agentouto[oauth]`)
+- [x] 공개 API 엑스포트: `AuthMethod`, `ApiKeyAuth`, `OpenAIOAuth`, `ClaudeOAuth`, `GoogleOAuth`, `TokenData`, `TokenStore`, `AuthError`
+- [x] 153개 테스트 통과, 하위 호환성 100% 보장
+- [x] ai-docs 전체 업데이트
+
 ### Phase 13: OpenAI Responses API 백엔드 ✅
 
 - [x] `providers/openai_responses.py` 신규 생성 — `OpenAIResponsesBackend` 클래스
@@ -171,6 +190,7 @@
 ## 3. 미구현 기능
 
 ### 추가 고려 사항
+- [ ] Google GCP OAuth 2.0 (자체 GCP 프로젝트 기반, 공식 지원 무료 티어)
 - [ ] 토큰 사용량 추적
 - [ ] 비용 추적
 - [ ] 타임아웃 설정 (에이전트 레벨)
@@ -192,6 +212,20 @@
 ---
 
 ## 5. 변경 이력
+
+### 0.11.0 (Phase 15: OAuth 인증)
+
+- `auth/` 모듈 신규 생성 (7개 파일): AuthMethod ABC, TokenData, TokenStore, ApiKeyAuth, OpenAIOAuth, ClaudeOAuth, GoogleOAuth, _oauth_common
+- `Provider.auth: AuthMethod | None` 필드 추가 + `resolve_api_key()` async 메서드
+- 4개 백엔드: `provider.api_key` → `await provider.resolve_api_key()` + 토큰 로테이션 캐시 `(api_key, client)` 튜플
+- `AuthError(provider_name, message)` 예외 추가
+- `aiohttp` 선택적 의존성 (`pip install agentouto[oauth]`)
+- 공개 API: AuthMethod, ApiKeyAuth, OpenAIOAuth, ClaudeOAuth, GoogleOAuth, TokenData, TokenStore, AuthError
+- ClaudeOAuth: ⚠️ Anthropic TOS 제한 경고 + 기본 client_id 주석 처리
+- GoogleOAuth: ⚠️ Google Antigravity TOS 제한 경고 + 기본 client_id 주석 처리
+- 테스트 153개, 하위 호환성 100% 보장
+- ai-docs 전체 업데이트 (ARCHITECTURE, PROVIDER_BACKENDS, ROADMAP, CONVENTIONS)
+- README 업데이트 (OAuth 섹션, Provider 테이블, Package Structure, Development Status)
 
 ### 0.10.1 (Phase 14: 에이전트/도구 혼동 에러 핸들링)
 

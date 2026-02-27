@@ -24,7 +24,12 @@ _JSON_TYPE_MAP: dict[str, int] = {
 
 class GoogleBackend(ProviderBackend):
     def __init__(self) -> None:
-        self._configured: set[str] = set()
+        self._configured_keys: dict[str, str] = {}
+
+    def _configure(self, provider: Provider, api_key: str) -> None:
+        if self._configured_keys.get(provider.name) != api_key:
+            genai.configure(api_key=api_key)
+            self._configured_keys[provider.name] = api_key
 
     async def call(
         self,
@@ -33,9 +38,8 @@ class GoogleBackend(ProviderBackend):
         agent: Agent,
         provider: Provider,
     ) -> LLMResponse:
-        if provider.name not in self._configured:
-            genai.configure(api_key=provider.api_key)
-            self._configured.add(provider.name)
+        api_key = await provider.resolve_api_key()
+        self._configure(provider, api_key)
 
         contents = _build_contents(context)
         google_tools = _build_tools(tools)

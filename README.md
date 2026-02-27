@@ -181,8 +181,58 @@ local = Provider(name="local", kind="openai", base_url="http://localhost:11434/v
 |-------|-------------|----------|
 | `name` | Identifier for the provider | ✅ |
 | `kind` | API type: `"openai"`, `"openai_responses"`, `"anthropic"`, `"google"` | ✅ |
-| `api_key` | API key | ✅ |
+| `api_key` | API key (not needed when `auth` is set) | ❌ |
 | `base_url` | Custom endpoint URL (for compatible APIs) | ❌ |
+| `auth` | `AuthMethod` instance for OAuth authentication | ❌ |
+
+### OAuth Authentication
+
+Providers can use OAuth 2.0 instead of static API keys via the `auth` parameter. Install OAuth dependencies:
+
+```bash
+pip install agentouto[oauth]
+```
+
+**OpenAI OAuth** — Use your ChatGPT Plus/Pro subscription:
+
+```python
+from agentouto import Provider, OpenAIOAuth
+
+auth = OpenAIOAuth(client_id="your-client-id")
+await auth.ensure_authenticated()  # Opens browser for login
+
+openai = Provider(name="openai", kind="openai", auth=auth)
+```
+
+**Claude OAuth** ⚠️ — Anthropic prohibits third-party OAuth usage. Account suspension risk:
+
+```python
+from agentouto import Provider, ClaudeOAuth
+
+# ⚠️ TOS VIOLATION RISK — Use API keys from console.anthropic.com instead
+auth = ClaudeOAuth(client_id="your-client-id")
+await auth.ensure_authenticated()
+
+anthropic = Provider(name="anthropic", kind="anthropic", auth=auth)
+```
+
+**Google OAuth** ⚠️ — Google bans accounts using Antigravity OAuth. Use your own GCP credentials:
+
+```python
+from agentouto import Provider, GoogleOAuth
+
+# ⚠️ Antigravity OAuth → account ban risk (Gmail, Drive, ALL services)
+# Safe: Use your own GCP OAuth Client ID from console.cloud.google.com
+auth = GoogleOAuth(
+    client_id="your-gcp-client-id.apps.googleusercontent.com",
+    client_secret="your-gcp-secret",
+)
+await auth.ensure_authenticated()
+
+google = Provider(name="google", kind="google", auth=auth)
+```
+
+OAuth tokens are automatically cached in `~/.agentouto/tokens/` and refreshed when expired.
 
 ### Agent — Model Settings Live Here
 
@@ -408,7 +458,15 @@ agentouto/
 ├── event_log.py         # AgentEvent, EventLog — structured event recording
 ├── tracing.py           # Trace, Span — call tree builder from event logs
 ├── _constants.py        # Shared constants (CALL_AGENT, FINISH)
-├── exceptions.py        # ProviderError, AgentError, ToolError, RoutingError
+├── exceptions.py        # ProviderError, AgentError, ToolError, RoutingError, AuthError
+├── auth/
+│   ├── __init__.py      # AuthMethod ABC, TokenData, TokenStore, OAuth implementations
+│   ├── api_key.py       # ApiKeyAuth — static API key wrapper
+│   ├── openai_oauth.py  # OpenAIOAuth — OpenAI ChatGPT subscription OAuth
+│   ├── claude_oauth.py  # ClaudeOAuth — Anthropic Claude OAuth (⚠️ TOS restricted)
+│   ├── google_oauth.py  # GoogleOAuth — Google Gemini/Antigravity OAuth (⚠️ TOS restricted)
+│   ├── token_store.py   # TokenStore — secure token persistence (~/.agentouto/tokens/)
+│   └── _oauth_common.py # PKCE, local callback server, browser auth, token exchange
 └── providers/
     ├── __init__.py      # ProviderBackend ABC, LLMResponse, get_backend()
     ├── openai.py        # OpenAI Chat Completions (+ compatible APIs) implementation
@@ -434,6 +492,7 @@ agentouto/
 | **9** | Reasoning tag handling (content preservation, detection prevention) | ✅ Done |
 | **10** | Auto max output tokens + safe JSON argument parsing | ✅ Done |
 | **13** | OpenAI Responses API backend (`openai_responses`) | ✅ Done |
+| **15** | OAuth authentication (OpenAI, Claude, Google) | ✅ Done |
 
 ---
 

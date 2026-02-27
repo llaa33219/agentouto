@@ -107,7 +107,8 @@ AgentOutOError
 ├── ProviderError(provider_name, message)
 ├── AgentError(agent_name, message)
 ├── ToolError(tool_name, message)
-└── RoutingError(message)
+├── RoutingError(message)
+└── AuthError(provider_name, message)
 ```
 
 ### 규칙
@@ -165,25 +166,47 @@ def get_backend(kind: str) -> ProviderBackend:
 
 이렇게 하면 사용하지 않는 프로바이더의 의존성이 import 시점에 필요하지 않다.
 
+### 선택적 의존성 Lazy Import
+
+선택적 의존성(`aiohttp` 등)은 실제 사용 시점에 lazy import하고, 미설치 시 `ModuleNotFoundError`로 안내:
+
+```python
+try:
+    import aiohttp
+except ModuleNotFoundError:
+    raise ModuleNotFoundError(
+        "aiohttp is required for OAuth authentication. "
+        "Install it with: pip install agentouto[oauth]"
+    ) from None
+```
+
+이 패턴은 `auth/_oauth_common.py`의 `exchange_token()`에서 사용된다.
+
 ---
 
 ## 8. 캐싱 패턴
 
-### 프로바이더 클라이언트 캐싱
+### 프로바이더 클라이언트 캐싱 (토큰 로테이션)
+
+OAuth 토큰이 갱신될 수 있으므로 `(api_key, client)` 튜플로 캐싱한다:
 
 ```python
 class OpenAIBackend:
     def __init__(self) -> None:
-        self._clients: dict[str, AsyncOpenAI] = {}
+        self._clients: dict[str, tuple[str, AsyncOpenAI]] = {}
 
-    def _get_client(self, provider: Provider) -> AsyncOpenAI:
-        if provider.name not in self._clients:
-            self._clients[provider.name] = AsyncOpenAI(...)
-        return self._clients[provider.name]
+    def _get_client(self, provider: Provider, api_key: str) -> AsyncOpenAI:
+        cached = self._clients.get(provider.name)
+        if cached is not None and cached[0] == api_key:
+            return cached[1]
+        client = AsyncOpenAI(api_key=api_key, base_url=provider.base_url)
+        self._clients[provider.name] = (api_key, client)
+        return client
 ```
 
 - 키: `provider.name`
 - 패턴: 모든 프로바이더 백엔드에서 동일하게 사용
+- `call()`/`stream()`에서 `api_key = await provider.resolve_api_key()` 호출 후 `_get_client`에 전달
 
 ### 프로바이더 백엔드 캐싱
 

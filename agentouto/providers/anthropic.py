@@ -25,15 +25,15 @@ _MAX_TOKENS_FALLBACK_RE = re.compile(r"\bis\s+(\d+)")
 
 class AnthropicBackend(ProviderBackend):
     def __init__(self) -> None:
-        self._clients: dict[str, AsyncAnthropic] = {}
+        self._clients: dict[str, tuple[str, AsyncAnthropic]] = {}
 
-    def _get_client(self, provider: Provider) -> AsyncAnthropic:
-        if provider.name not in self._clients:
-            self._clients[provider.name] = AsyncAnthropic(
-                api_key=provider.api_key,
-                base_url=provider.base_url,
-            )
-        return self._clients[provider.name]
+    def _get_client(self, provider: Provider, api_key: str) -> AsyncAnthropic:
+        cached = self._clients.get(provider.name)
+        if cached is not None and cached[0] == api_key:
+            return cached[1]
+        client = AsyncAnthropic(api_key=api_key, base_url=provider.base_url)
+        self._clients[provider.name] = (api_key, client)
+        return client
 
     async def call(
         self,
@@ -67,7 +67,8 @@ class AnthropicBackend(ProviderBackend):
         agent: Agent,
         provider: Provider,
     ) -> AsyncIterator[str | LLMResponse]:
-        client = self._get_client(provider)
+        api_key = await provider.resolve_api_key()
+        client = self._get_client(provider, api_key)
 
         messages = _build_messages(context)
         anthropic_tools = _build_tools(tools)

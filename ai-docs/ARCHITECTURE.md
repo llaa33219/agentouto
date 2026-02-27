@@ -14,6 +14,14 @@ agentouto/
 ├── context.py           # 에이전트별 대화 컨텍스트 관리
 ├── event_log.py         # 구조화된 이벤트 로깅 (AgentEvent, EventLog)
 ├── exceptions.py        # 커스텀 예외 계층
+├── auth/
+│   ├── __init__.py      # AuthMethod ABC, TokenData, 공개 API 엑스포트
+│   ├── api_key.py       # ApiKeyAuth (정적 API 키 래퍼)
+│   ├── openai_oauth.py  # OpenAIOAuth (OpenAI OAuth 2.0 + PKCE)
+│   ├── claude_oauth.py  # ClaudeOAuth (Anthropic OAuth, ⚠️ TOS 제한)
+│   ├── google_oauth.py  # GoogleOAuth (Google OAuth, ⚠️ TOS 제한)
+│   ├── token_store.py   # TokenStore (토큰 영속 저장)
+│   └── _oauth_common.py # PKCE, 콜백 서버, 브라우저 인증, 토큰 교환
 ├── message.py           # Message 데이터클래스
 ├── provider.py          # Provider 데이터클래스
 ├── router.py            # 메시지 라우팅, 시스템 프롬프트, 도구 스키마
@@ -52,6 +60,14 @@ agentouto/
 | `StreamEvent` | dataclass | 스트리밍 이벤트 |
 | `Attachment` | dataclass | 파일 첨부 데이터 (이미지, 오디오 등) |
 | `ToolResult` | dataclass | 도구 리치 반환 타입 (텍스트 + 첨부파일) |
+| `AuthMethod` | ABC | 인증 방식 추상 클래스 (API 키, OAuth 등) |
+| `ApiKeyAuth` | class | 정적 API 키 인증 (하위 호환 래퍼) |
+| `OpenAIOAuth` | class | OpenAI OAuth 2.0 + PKCE 인증 |
+| `ClaudeOAuth` | class | Anthropic Claude OAuth 인증 (⚠️ TOS 제한) |
+| `GoogleOAuth` | class | Google Gemini/Antigravity OAuth 인증 (⚠️ TOS 제한) |
+| `TokenData` | dataclass | OAuth 토큰 데이터 컨테이너 |
+| `TokenStore` | class | 토큰 영속 저장소 (~/.agentouto/tokens/) |
+| `AuthError` | exception | 인증 실패 예외 (OAuth 토큰 갱신 실패 등) |
 
 ---
 
@@ -87,11 +103,16 @@ class Agent:
 class Provider:
     name: str                                    # 식별 이름
     kind: Literal["openai", "openai_responses", "anthropic", "google"]  # API 종류
-    api_key: str                                 # API 키
-    base_url: str | None                         # 커스텀 엔드포인트 (선택)
+    api_key: str = ""                            # API 키 (auth 설정 시 생략 가능)
+    base_url: str | None = None                  # 커스텀 엔드포인트 (선택)
+    auth: AuthMethod | None = None               # OAuth 인증 방식 (선택)
+
+    async def resolve_api_key(self) -> str        # auth 또는 api_key에서 키/토큰 반환
 ```
 
 API 접속 정보만 담당. 모델 설정은 Agent에서 한다.
+
+`auth`가 설정되면 `resolve_api_key()`는 `auth.get_token()`을 호출하여 OAuth 토큰을 반환한다. `auth`가 `None`이면 기존 `api_key`를 반환한다. 하위 호환성 100% 보장.
 
 ### `message.py` — Message
 
@@ -296,7 +317,8 @@ AgentOutOError (base)
 ├── ProviderError(provider_name, message)
 ├── AgentError(agent_name, message)
 ├── ToolError(tool_name, message)
-└── RoutingError(message)
+├── RoutingError(message)
+└── AuthError(provider_name, message)
 ```
 
 ### `event_log.py` — EventLog
@@ -365,6 +387,43 @@ async def async_run_stream(entry, message, agents, tools, providers, *, attachme
 ```
 
 `async_run_stream()`은 `Runtime.execute_stream()`을 랩한다.
+
+### `auth/` — 인증 모듈
+
+OAuth 2.0 및 정적 API 키 인증을 추상화하는 모듈.
+
+```python
+class AuthMethod(ABC):
+    async def get_token(self) -> str              # 유효한 토큰 반환 (만료 시 자동 갱신)
+    async def ensure_authenticated(self) -> None  # 인증 플로우 실행 (브라우저 열기 등)
+    is_authenticated: bool                        # 현재 인증 상태
+
+@dataclass
+class TokenData:
+    access_token: str
+    refresh_token: str | None
+    expires_at: float | None
+    scopes: list[str]
+    extra: dict[str, Any]
+```
+
+**구현체:**
+- `ApiKeyAuth` — 정적 API 키 래퍼. 기존 `api_key` 동작과 동일.
+- `OpenAIOAuth` — OpenAI OAuth 2.0 + PKCE. ChatGPT Plus/Pro 구독 인증.
+- `ClaudeOAuth` — Anthropic Claude OAuth (⚠️ TOS 제한, 기본 client_id 주석 처리).
+- `GoogleOAuth` — Google Gemini/Antigravity OAuth (⚠️ TOS 제한, 기본 client_id 주석 처리).
+
+**TokenStore:**
+- `~/.agentouto/tokens/` 디렉토리에 토큰 JSON 저장 (파일: `0o600`, 디렉토리: `0o700`)
+- `save(provider_name, tokens)` / `load(provider_name)` / `delete(provider_name)`
+
+**_oauth_common.py:**
+- `generate_pkce()` — PKCE code_verifier + code_challenge (S256)
+- `find_free_port()` — localhost 랜덤 포트
+- `wait_for_callback(port, timeout)` — 로컬 HTTP 서버로 OAuth 콜백 수신
+- `exchange_token(token_url, params)` — 토큰 교환 (aiohttp 사용, lazy import)
+- `refresh_access_token(token_url, refresh_token, client_id)` — 토큰 갱신
+- `build_authorize_url(...)` — 인증 URL 생성
 
 ### `providers/__init__.py`
 
@@ -453,6 +512,15 @@ Context (프로바이더 비의존)
 | `anthropic` | ≥0.34.0 | Anthropic API 클라이언트 |
 | `google-generativeai` | ≥0.8.0 | Google Gemini API 클라이언트 |
 
+### 선택적 의존성 (`[oauth]`)
+
+| 패키지 | 버전 | 용도 |
+|--------|------|------|
+| `aiohttp` | ≥3.9.0 | OAuth 토큰 교환 HTTP 클라이언트 |
+
+OAuth 기능 설치: `pip install agentouto[oauth]`
+`aiohttp`는 lazy import로 로드되므로 OAuth를 사용하지 않으면 설치하지 않아도 된다.
+
 ### 개발 의존성
 
 | 패키지 | 버전 | 용도 |
@@ -492,6 +560,26 @@ Context (프로바이더 비의존)
 ### 패턴 2: 재귀적 에이전트 루프
 
 `call_agent`는 `_run_agent_loop`을 재귀적으로 호출한다. 각 호출은 독립적인 Context를 가진다. 호출 스택이 곧 에이전트 호출 체인이다.
+
+### 패턴 5: 토큰 로테이션 캐싱
+
+OAuth 토큰이 갱신될 수 있으므로, 프로바이더 백엔드는 `(api_key, client)` 튜플로 클라이언트를 캐싱한다:
+
+```python
+class OpenAIBackend:
+    def __init__(self) -> None:
+        self._clients: dict[str, tuple[str, AsyncOpenAI]] = {}
+
+    def _get_client(self, provider: Provider, api_key: str) -> AsyncOpenAI:
+        cached = self._clients.get(provider.name)
+        if cached is not None and cached[0] == api_key:
+            return cached[1]
+        client = AsyncOpenAI(api_key=api_key, base_url=provider.base_url)
+        self._clients[provider.name] = (api_key, client)
+        return client
+```
+
+`call()`/`stream()`에서 `api_key = await provider.resolve_api_key()`를 호출한 후 `_get_client(provider, api_key)`로 전달한다. 토큰이 변경되면 클라이언트를 새로 생성한다.
 
 ### 패턴 3: 프로바이더 추상화
 
