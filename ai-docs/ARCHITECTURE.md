@@ -27,6 +27,7 @@ agentouto/
 ├── router.py            # 메시지 라우팅, 시스템 프롬프트, 도구 스키마
 ├── runtime.py           # 에이전트 루프 엔진, 병렬 실행, 스트리밍, run()/async_run()
 ├── streaming.py         # 스트리밍 인터페이스 (StreamEvent, async_run_stream)
+├── summarizer.py        # 컨텍스트 요약 (토큰 추정, 경계 탐색, 요약 프롬프트 생성)
 ├── tool.py              # Tool 데코레이터/클래스
 ├── tracing.py           # 호출 트레이싱 (Span, Trace)
 └── providers/
@@ -87,10 +88,13 @@ class Agent:
     reasoning_effort: str   # 추론 강도 (기본: "medium")
     reasoning_budget: int | None  # 추론 토큰 예산 (기본: None)
     temperature: float      # 온도 (기본: 1.0)
+    context_window: int | None  # 컨텍스트 윈도우 토큰 수 (기본: None → 요약 비활성화)
     extra: dict[str, Any]   # 추가 파라미터 (기본: {})
 ```
 
 순수 데이터 컨테이너. 로직 없음. `provider` 필드는 `Provider.name`과 매칭되는 문자열.
+
+`context_window`가 설정되면 에이전트 루프에서 LLM 호출 전마다 추정 토큰이 `context_window * 0.75`를 초과하는지 확인한다. 초과 시 오래된 메시지를 LLM으로 요약하여 교체한다. `None`이면 요약이 비활성화된다.
 
 `max_output_tokens`가 `None`이면 각 프로바이더가 자동으로 최대값을 사용한다:
 - **OpenAI/Google**: 파라미터 생략 → API가 모델 최대값 자동 적용
@@ -184,6 +188,7 @@ class Context:
     def add_assistant_text(content)                            # 어시스턴트 텍스트 추가
     def add_assistant_tool_calls(tool_calls, content)          # 어시스턴트 도구 호출 추가
     def add_tool_result(tool_call_id, tool_name, content, attachments=None)  # 도구 결과 추가 (첨부파일 선택)
+    def replace_with_summary(summary, keep_from)               # 오래된 메시지를 요약으로 교체
 ```
 
 `Attachment` dataclass: `mime_type`, `data`, `url`, `name` 보유. `data` 또는 `url` 중 하나 이상 필수.
@@ -200,7 +205,31 @@ assistant 메시지의 원본 content는 추론 태그(`<think>`, `<thinking>`, 
 - 텍스트 기반 파싱 프로바이더는 도구 호출 파싱 전에 `_content_outside_reasoning()`을 사용하여 추론 블록을 제외해야 함
 - 구조화된 API 프로바이더(OpenAI, Anthropic, Google)는 도구 호출이 별도 데이터로 반환되므로 이 필터가 불필요
 
+`replace_with_summary(summary, keep_from)`: `_messages[:keep_from]`을 요약 텍스트로 교체한다. `keep_from` 이후 메시지가 user로 시작하면 요약을 해당 메시지에 병합하여 역할 교대 규칙을 유지한다. 그렇지 않으면 요약을 담은 새 user 메시지를 앞에 추가한다.
+
 각 프로바이더 백엔드가 이 Context를 자신의 API 포맷으로 변환한다.
+
+### `summarizer.py` — Context Summarizer
+
+대화가 길어질 때 오래된 메시지를 LLM으로 요약하여 토큰을 절약하고 컨텍스트 오버플로우를 방지하는 모듈.
+
+```python
+def needs_summarization(context, context_window) -> bool       # 요약 필요 여부 판단 (75% 임계값)
+def build_summarize_context(messages_to_summarize) -> Context   # 요약용 임시 Context 생성
+def estimate_context_tokens(context) -> int                     # 토큰 수 추정 (len // 4 휴리스틱)
+def find_summarization_boundary(messages, context_window) -> int | None  # 요약/보존 경계 인덱스
+def build_summary_prompt(messages) -> str                       # 메시지를 요약 프롬프트로 포맷
+```
+
+**토큰 추정**: `len(text) // 4` 휴리스틱 사용. 정밀한 계산이 아닌 트리거 판단용.
+
+**경계 탐색 (`find_summarization_boundary`)**:
+1. 메시지 끝에서부터 역순으로 토큰을 누적하며 보존할 메시지 범위 결정
+2. `context_window * 0.3` 만큼의 토큰 예산을 최근 메시지에 할당
+3. 분할 지점이 `tool` 메시지에 위치하면 뒤로 이동하여 assistant(tool_calls) + tool 결과 쌍을 분리하지 않음
+4. 최소 2개 메시지를 보존, 유효한 분할점이 없으면 `None` 반환
+
+**에이전트별 독립 동작**: 각 `_run_agent_loop` 호출이 독립적인 Context를 가지므로 요약도 에이전트별로 독립적으로 동작한다.
 
 ### `router.py` — Router
 

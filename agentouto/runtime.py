@@ -15,6 +15,12 @@ from agentouto.exceptions import RoutingError, ToolError
 from agentouto.message import Message
 from agentouto.provider import Provider
 from agentouto.router import Router
+from agentouto.summarizer import (
+    build_summarize_context,
+    estimate_context_tokens,
+    find_summarization_boundary,
+    needs_summarization,
+)
 from agentouto.tool import Tool, ToolResult
 from agentouto.tracing import Trace
 
@@ -118,6 +124,8 @@ class Runtime:
         tool_schemas = self._router.build_tool_schemas(agent.name)
 
         while True:
+            await self._maybe_summarize(context, agent)
+
             self._record("llm_call", agent.name, call_id, parent_call_id, {
                 "model": agent.model,
             })
@@ -246,6 +254,39 @@ class Runtime:
         except Exception as exc:
             raise ToolError(tc.name, str(exc)) from exc
 
+    async def _maybe_summarize(
+        self, context: Context, agent: Agent
+    ) -> None:
+        if agent.context_window is None:
+            return
+
+        if not needs_summarization(context, agent.context_window):
+            return
+
+        tokens = estimate_context_tokens(context)
+        messages = context.messages
+        split = find_summarization_boundary(messages, agent.context_window)
+        if split is None:
+            return
+
+        tmp_ctx = build_summarize_context(messages[:split])
+
+        try:
+            response = await self._router.call_llm(agent, tmp_ctx, [])
+            if response.content:
+                context.replace_with_summary(response.content, keep_from=split)
+                logger.info(
+                    "[%s] Summarized %d messages (%d → %d est. tokens)",
+                    agent.name,
+                    split,
+                    tokens,
+                    estimate_context_tokens(context),
+                )
+        except Exception as exc:
+            logger.warning(
+                "[%s] Context summarization failed: %s", agent.name, exc
+            )
+
     # --- Streaming ---
 
     async def execute_stream(
@@ -304,6 +345,8 @@ class Runtime:
         tool_schemas = self._router.build_tool_schemas(agent.name)
 
         while True:
+            await self._maybe_summarize(context, agent)
+
             response = None
             async for chunk in self._router.stream_llm(
                 agent, context, tool_schemas

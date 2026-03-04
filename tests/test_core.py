@@ -68,6 +68,7 @@ class TestAgent:
         assert a.reasoning_effort == "medium"
         assert a.reasoning_budget is None
         assert a.temperature == 1.0
+        assert a.context_window is None
         assert a.extra == {}
 
     def test_custom_values(self) -> None:

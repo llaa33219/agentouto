@@ -15,4 +15,5 @@ class Agent:
     reasoning_effort: str = "medium"
     reasoning_budget: int | None = None
     temperature: float = 1.0
+    context_window: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)

@@ -69,3 +69,20 @@ class Context:
                 attachments=attachments,
             )
         )
+
+    def replace_with_summary(self, summary: str, keep_from: int) -> None:
+        summary_text = (
+            f"[Previous conversation summary]\n{summary}\n[End of summary]"
+        )
+        kept = self._messages[keep_from:]
+        if kept and kept[0].role == "user":
+            kept[0] = ContextMessage(
+                role="user",
+                content=f"{summary_text}\n\n{kept[0].content or ''}",
+                attachments=kept[0].attachments,
+            )
+            self._messages = kept
+        else:
+            self._messages = [
+                ContextMessage(role="user", content=summary_text)
+            ] + kept
