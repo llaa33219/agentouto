@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from agentouto.context import Context, ContextMessage
 
-_SUMMARIZE_THRESHOLD = 0.75
+_SUMMARIZE_THRESHOLD = 0.70  # 70% of context window triggers self-summarization
 _KEEP_RATIO = 0.3
 
 _SUMMARIZE_SYSTEM = (
-    "Summarize the following conversation history concisely. "
-    "Preserve key facts, decisions, tool call results, and important context. "
-    "Be thorough but brief."
+    "You are a summarization assistant. Your task is to summarize the conversation history "
+    "below into a concise form that preserves key facts, decisions, tool call results, "
+    "and important context. "
+    "Focus on information that would be needed to continue this conversation meaningfully."
 )
 
 
@@ -17,10 +18,23 @@ def needs_summarization(context: Context, context_window: int) -> bool:
     return tokens > int(context_window * _SUMMARIZE_THRESHOLD)
 
 
-def build_summarize_context(messages_to_summarize: list[ContextMessage]) -> Context:
+def build_self_summarize_context(messages_to_summarize: list[ContextMessage], system_prompt: str) -> Context:
     prompt = build_summary_prompt(messages_to_summarize)
-    ctx = Context(_SUMMARIZE_SYSTEM)
-    ctx.add_user(prompt)
+    full_prompt = f"""{_SUMMARIZE_SYSTEM}
+
+Below is the conversation history to summarize:
+
+{prompt}
+
+Please provide a concise summary that preserves:
+- Key facts and decisions
+- Important tool call results
+- Context needed to continue the conversation
+- Any pending tasks or goals
+
+Summary:"""
+    ctx = Context(system_prompt)
+    ctx.add_user(full_prompt)
     return ctx
 
 

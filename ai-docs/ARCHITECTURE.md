@@ -23,6 +23,7 @@ agentouto/
 │   ├── token_store.py   # TokenStore (토큰 영속 저장)
 │   └── _oauth_common.py # PKCE, 콜백 서버, 브라우저 인증, 토큰 교환
 ├── message.py           # Message 데이터클래스
+├── model_metadata.py    # 모델 메타데이터 (context_window, max_output_tokens)
 ├── provider.py          # Provider 데이터클래스
 ├── router.py            # 메시지 라우팅, 시스템 프롬프트, 도구 스키마
 ├── runtime.py           # 에이전트 루프 엔진, 병렬 실행, 스트리밍, run()/async_run()
@@ -34,7 +35,7 @@ agentouto/
     ├── __init__.py      # ProviderBackend ABC, LLMResponse, get_backend()
     ├── openai.py        # OpenAI Chat Completions 구현 (스트리밍, 안전한 JSON 파싱 포함)
     ├── openai_responses.py  # OpenAI Responses API 구현 (네이티브 스트리밍 포함)
-    ├── anthropic.py     # Anthropic 구현 (네이티브 스트리밍, auto max_tokens 탐색 포함)
+    ├── anthropic.py     # Anthropic 구현 (네이티브 스트리밍, auto max_tokens 포함)
     └── google.py        # Google Gemini 구현
 ```
 
@@ -94,7 +95,7 @@ class Agent:
 
 순수 데이터 컨테이너. 로직 없음. `provider` 필드는 `Provider.name`과 매칭되는 문자열.
 
-`context_window`가 설정되면 에이전트 루프에서 LLM 호출 전마다 추정 토큰이 `context_window * 0.75`를 초과하는지 확인한다. 초과 시 오래된 메시지를 LLM으로 요약하여 교체한다. `None`이면 요약이 비활성화된다.
+`context_window`가 설정되면 에이전트 루프에서 LLM 호출 전마다 추정 토큰이 `context_window * 0.70`을 초과하는지 확인한다. 초과 시 에이전트가 스스로 대화를 요약하여 교체한다. `None`이면 요약이 비활성화된다.
 
 `max_output_tokens`가 `None`이면 각 프로바이더가 자동으로 최대값을 사용한다:
 - **OpenAI/Google**: 파라미터 생략 → API가 모델 최대값 자동 적용
@@ -117,6 +118,35 @@ class Provider:
 API 접속 정보만 담당. 모델 설정은 Agent에서 한다.
 
 `auth`가 설정되면 `resolve_api_key()`는 `auth.get_token()`을 호출하여 OAuth 토큰을 반환한다. `auth`가 `None`이면 기존 `api_key`를 반환한다. 하위 호환성 100% 보장.
+
+### `model_metadata.py` — Model Metadata
+
+모델별 메타데이터 (context_window, max_output_tokens) 관리 모듈.
+
+```python
+@dataclass
+class ModelMetadata:
+    context_window: int
+    max_output_tokens: int | None = None
+
+def get_model_info(model: str) -> ModelMetadata | None
+def resolve_max_output_tokens(model: str, user_value: int | None) -> int | None
+async def fetch_model_metadata_from_api(api_key: str | None = None) -> dict[str, ModelMetadata]
+```
+
+**메타데이터 소스**:
+1. **Fallback 딕셔너리**: 100+ 모델의 알려진 메타데이터 하드코딩 (OpenAI, Anthropic, Google, Meta, DeepSeek, xAI, Alibaba 등)
+2. **Artificial Analysis API**: `ARTIFICIAL_ANALYSIS_API_KEY` 환경변수로 API 키 설정 시 실시간 데이터Fetch (선택적)
+
+**동작 방식**:
+- `agent.max_output_tokens`가 `None`이면 모델 메타데이터에서 자동 결정
+- 딕셔너리에 없으면 API에서Fetch 시도
+- 여전히 없으면 프로바이더 기본값 사용
+
+**지원 모델 예시**:
+- OpenAI: gpt-5 (400K context, 128K output), gpt-4o (128K context, 16K output)
+- Anthropic: claude-opus-4-6 (200K context, 32K output), claude-sonnet-4-6 (200K context, 32K output)
+- Google: gemini-2.5-pro (1M context, 64K output), gemini-1.5-pro (2M context)
 
 ### `message.py` — Message
 
@@ -214,14 +244,18 @@ assistant 메시지의 원본 content는 추론 태그(`<think>`, `<thinking>`, 
 대화가 길어질 때 오래된 메시지를 LLM으로 요약하여 토큰을 절약하고 컨텍스트 오버플로우를 방지하는 모듈.
 
 ```python
-def needs_summarization(context, context_window) -> bool       # 요약 필요 여부 판단 (75% 임계값)
-def build_summarize_context(messages_to_summarize) -> Context   # 요약용 임시 Context 생성
-def estimate_context_tokens(context) -> int                     # 토큰 수 추정 (len // 4 휴리스틱)
-def find_summarization_boundary(messages, context_window) -> int | None  # 요약/보존 경계 인덱스
+def needs_summarization(context, context_window) -> bool       # 요약 필요 여부 판단 (70% 임계값)
+def build_self_summarize_context(messages_to_summarize, system_prompt) -> Context  # 에이전트 자가 요약용 Context 생성
 def build_summary_prompt(messages) -> str                       # 메시지를 요약 프롬프트로 포맷
 ```
 
 **토큰 추정**: `len(text) // 4` 휴리스틱 사용. 정밀한 계산이 아닌 트리거 판단용.
+
+**자가 요약 (`build_self_summarize_context`)**: 에이전트가 스스로 대화를 요약하는 방식. 70% 임계값 초과 시:
+1. 요약할 메시지를 포맷하여 프롬프트 생성
+2. 에이전트의 원본 system_prompt를 유지한 상태에서 요약 요청
+3. 에이전트가 생성한 요약으로 이전 메시지 대체
+4. 외부 LLM 호출 없이 에이전트 자신이 요약하므로 효율적
 
 **경계 탐색 (`find_summarization_boundary`)**:
 1. 메시지 끝에서부터 역순으로 토큰을 누적하며 보존할 메시지 범위 결정

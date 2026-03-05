@@ -9,6 +9,7 @@ import google.generativeai as genai
 from agentouto.agent import Agent
 from agentouto.context import Attachment, Context, ToolCall
 from agentouto.exceptions import ProviderError
+from agentouto.model_metadata import resolve_max_output_tokens
 from agentouto.provider import Provider
 from agentouto.providers import LLMResponse, ProviderBackend
 
@@ -47,8 +48,9 @@ class GoogleBackend(ProviderBackend):
         gen_config: dict[str, Any] = {
             "temperature": agent.temperature,
         }
-        if agent.max_output_tokens is not None:
-            gen_config["max_output_tokens"] = agent.max_output_tokens
+        max_tokens = resolve_max_output_tokens(agent.model, agent.max_output_tokens)
+        if max_tokens is not None:
+            gen_config["max_output_tokens"] = max_tokens
         if agent.reasoning:
             gen_config["thinking_config"] = {
                 "thinking_budget": agent.reasoning_budget or 4096,

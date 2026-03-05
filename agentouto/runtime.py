@@ -16,7 +16,7 @@ from agentouto.message import Message
 from agentouto.provider import Provider
 from agentouto.router import Router
 from agentouto.summarizer import (
-    build_summarize_context,
+    build_self_summarize_context,
     estimate_context_tokens,
     find_summarization_boundary,
     needs_summarization,
@@ -269,14 +269,16 @@ class Runtime:
         if split is None:
             return
 
-        tmp_ctx = build_summarize_context(messages[:split])
+        summarize_context = build_self_summarize_context(
+            messages[:split], context.system_prompt
+        )
 
         try:
-            response = await self._router.call_llm(agent, tmp_ctx, [])
+            response = await self._router.call_llm(agent, summarize_context, [])
             if response.content:
                 context.replace_with_summary(response.content, keep_from=split)
                 logger.info(
-                    "[%s] Summarized %d messages (%d → %d est. tokens)",
+                    "[%s] Self-summarized %d messages (%d → %d est. tokens)",
                     agent.name,
                     split,
                     tokens,
@@ -284,7 +286,7 @@ class Runtime:
                 )
         except Exception as exc:
             logger.warning(
-                "[%s] Context summarization failed: %s", agent.name, exc
+                "[%s] Self-summarization failed: %s", agent.name, exc
             )
 
     # --- Streaming ---
@@ -511,6 +513,11 @@ async def async_run(
     attachments: list[Attachment] | None = None,
     debug: bool = False,
 ) -> RunResult:
+    for p in providers:
+        if p.artificial_analysis_key:
+            from agentouto.model_metadata import set_api_key
+            set_api_key(p.artificial_analysis_key)
+            break
     router = Router(agents, tools, providers)
     runtime = Runtime(router, debug=debug)
     return await runtime.execute(entry, message, attachments=attachments)

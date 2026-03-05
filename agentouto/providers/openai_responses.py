@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 from agentouto.agent import Agent
 from agentouto.context import Attachment, Context, ToolCall
 from agentouto.exceptions import ProviderError
+from agentouto.model_metadata import resolve_max_output_tokens
 from agentouto.provider import Provider
 from agentouto.providers import LLMResponse, ProviderBackend
 from agentouto.providers.openai import _parse_tool_arguments
@@ -48,8 +49,9 @@ class OpenAIResponsesBackend(ProviderBackend):
             "instructions": context.system_prompt,
             **agent.extra,
         }
-        if agent.max_output_tokens is not None:
-            params["max_output_tokens"] = agent.max_output_tokens
+        max_tokens = resolve_max_output_tokens(agent.model, agent.max_output_tokens)
+        if max_tokens is not None:
+            params["max_output_tokens"] = max_tokens
         if response_tools:
             params["tools"] = response_tools
         if agent.reasoning:
@@ -84,8 +86,9 @@ class OpenAIResponsesBackend(ProviderBackend):
             "stream": True,
             **agent.extra,
         }
-        if agent.max_output_tokens is not None:
-            params["max_output_tokens"] = agent.max_output_tokens
+        max_tokens = resolve_max_output_tokens(agent.model, agent.max_output_tokens)
+        if max_tokens is not None:
+            params["max_output_tokens"] = max_tokens
         if response_tools:
             params["tools"] = response_tools
         if agent.reasoning:

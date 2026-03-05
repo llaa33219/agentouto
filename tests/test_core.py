@@ -10,7 +10,6 @@ from agentouto.context import Attachment, Context, ContextMessage, ToolCall
 from agentouto.message import Message
 from agentouto.provider import Provider
 from agentouto.providers import LLMResponse, _content_outside_reasoning
-from agentouto.providers.anthropic import _parse_max_tokens_from_error
 from agentouto.providers.openai import _parse_tool_arguments
 from agentouto.tool import Tool, ToolResult
 
@@ -586,34 +585,6 @@ class TestParseToolArguments:
 
     def test_incomplete_json_completely_broken(self) -> None:
         assert _parse_tool_arguments('{"query":') == {}
-
-
-# --- Anthropic Max Tokens Discovery ---
-
-
-class TestParseMaxTokensFromError:
-    def test_standard_format(self) -> None:
-        msg = "max_tokens: 999999 > 64000, which is the maximum allowed number of output tokens for claude-sonnet-4-5-20250929"
-        assert _parse_max_tokens_from_error(msg) == 64000
-
-    def test_opus_format(self) -> None:
-        msg = "max_tokens: 21333 > 4096, which is the maximum allowed number of output tokens for claude-3-opus-20240229"
-        assert _parse_max_tokens_from_error(msg) == 4096
-
-    def test_fallback_regex(self) -> None:
-        msg = "Your requested 'max_tokens' value is too large. The maximum value for model 'claude-3-5-sonnet-20240620' is 8192."
-        assert _parse_max_tokens_from_error(msg) == 8192
-
-    def test_no_match(self) -> None:
-        msg = "Connection refused"
-        assert _parse_max_tokens_from_error(msg) is None
-
-    def test_empty_string(self) -> None:
-        assert _parse_max_tokens_from_error("") is None
-
-    def test_wrapped_error_json(self) -> None:
-        msg = '{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 999999 > 16384, which is the maximum allowed number of output tokens for claude-3-haiku-20240307"}}'
-        assert _parse_max_tokens_from_error(msg) == 16384
 
 
 # --- Attachment ---

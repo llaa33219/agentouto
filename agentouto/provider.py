@@ -14,6 +14,7 @@ class Provider:
     api_key: str = ""
     base_url: str | None = None
     auth: AuthMethod | None = None
+    artificial_analysis_key: str | None = None
 
     async def resolve_api_key(self) -> str:
         """Return the API key or OAuth token to use for requests."""

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -11,16 +10,13 @@ from anthropic import AsyncAnthropic
 from agentouto.agent import Agent
 from agentouto.context import Attachment, Context, ToolCall
 from agentouto.exceptions import ProviderError
+from agentouto.model_metadata import resolve_max_output_tokens
 from agentouto.provider import Provider
 from agentouto.providers import LLMResponse, ProviderBackend
 
 logger = logging.getLogger("agentouto")
 
-_max_tokens_cache: dict[str, int] = {}
-_PROBE_MAX_TOKENS = 999_999_999
 _DEFAULT_MAX_TOKENS = 8192
-_MAX_TOKENS_RE = re.compile(r"> (\d+),")
-_MAX_TOKENS_FALLBACK_RE = re.compile(r"\bis\s+(\d+)")
 
 
 class AnthropicBackend(ProviderBackend):
@@ -73,9 +69,9 @@ class AnthropicBackend(ProviderBackend):
         messages = _build_messages(context)
         anthropic_tools = _build_tools(tools)
 
-        max_tokens = agent.max_output_tokens
+        max_tokens = resolve_max_output_tokens(agent.model, agent.max_output_tokens)
         if max_tokens is None:
-            max_tokens = _max_tokens_cache.get(agent.model, _PROBE_MAX_TOKENS)
+            max_tokens = _DEFAULT_MAX_TOKENS
 
         params: dict[str, Any] = {
             "model": agent.model,
@@ -99,28 +95,7 @@ class AnthropicBackend(ProviderBackend):
         try:
             response_stream = await client.messages.create(**params)
         except Exception as exc:
-            if agent.max_output_tokens is not None or agent.model in _max_tokens_cache:
-                raise ProviderError(provider.name, str(exc)) from exc
-            error_str = str(exc)
-            resolved = _parse_max_tokens_from_error(error_str)
-            if resolved is None:
-                if "max_tokens" not in error_str.lower():
-                    raise ProviderError(provider.name, error_str) from exc
-                resolved = _DEFAULT_MAX_TOKENS
-                logger.warning(
-                    "Could not discover max_tokens for %s, using %d",
-                    agent.model, resolved,
-                )
-            else:
-                logger.info(
-                    "Discovered max_tokens=%d for %s", resolved, agent.model,
-                )
-                _max_tokens_cache[agent.model] = resolved
-            params["max_tokens"] = resolved
-            try:
-                response_stream = await client.messages.create(**params)
-            except Exception as retry_exc:
-                raise ProviderError(provider.name, str(retry_exc)) from retry_exc
+            raise ProviderError(provider.name, str(exc)) from exc
 
         accumulated_content = ""
         tool_blocks: dict[int, dict[str, Any]] = {}
@@ -141,9 +116,6 @@ class AnthropicBackend(ProviderBackend):
                     if event.index in tool_blocks:
                         tool_blocks[event.index]["input_json"] += event.delta.partial_json
 
-        if max_tokens == _PROBE_MAX_TOKENS and agent.model not in _max_tokens_cache:
-            _max_tokens_cache[agent.model] = _PROBE_MAX_TOKENS
-
         if not accumulated_content and not tool_blocks:
             raise ProviderError(provider.name, "Empty response: no content blocks returned")
 
@@ -162,21 +134,6 @@ class AnthropicBackend(ProviderBackend):
         yield LLMResponse(
             content=accumulated_content or None, tool_calls=parsed_calls,
         )
-
-
-def _parse_max_tokens_from_error(error_msg: str) -> int | None:
-    """Extract the maximum allowed output tokens from an Anthropic API error.
-
-    Anthropic returns errors like:
-        ``max_tokens: 999999 > 64000, which is the maximum allowed ...``
-    """
-    match = _MAX_TOKENS_RE.search(error_msg)
-    if match:
-        return int(match.group(1))
-    match = _MAX_TOKENS_FALLBACK_RE.search(error_msg)
-    if match:
-        return int(match.group(1))
-    return None
 
 
 def _build_attachment_blocks(attachments: list[Attachment]) -> list[dict[str, Any]]:
