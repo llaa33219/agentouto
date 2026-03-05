@@ -134,9 +134,14 @@ class ModelMetadataError(Exception): ...
 def get_model_info(model: str) -> ModelMetadata
 def resolve_max_output_tokens(model: str, user_value: int | None) -> int | None
 async def ensure_loaded() -> None
+def clear_cache() -> None
 ```
 
 **메타데이터 소스**: OpenRouter API만 사용 (무료, API Key 불필요)
+
+**캐싱**:
+- 한 번 로드되면 메모리에 캐시됨
+- `clear_cache()`로 캐시 초기화 가능
 
 **동작 방식**:
 - OpenRouter API에서 실시간 Fetch
