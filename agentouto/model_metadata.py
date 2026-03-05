@@ -24,30 +24,37 @@ class ModelMetadataError(Exception):
 
 _loaded: bool = False
 _load_attempted: bool = False
+_load_error: str | None = None
 _api_metadata: dict[str, ModelMetadata] = {}
 
 
 def clear_cache() -> None:
-    global _loaded, _load_attempted, _api_metadata
+    global _loaded, _load_attempted, _load_error, _api_metadata
     _loaded = False
     _load_attempted = False
+    _load_error = None
     _api_metadata.clear()
     logger.info("Model metadata cache cleared")
 
 
 async def _load_from_openrouter() -> dict[str, ModelMetadata]:
-    global _loaded, _load_attempted, _api_metadata
+    global _loaded, _load_attempted, _load_error, _api_metadata
     
     if _loaded:
         return _api_metadata
     
     if _load_attempted:
-        raise ModelMetadataError("Failed to load model metadata from OpenRouter")
+        logger.error("Previous load attempt failed: %s", _load_error)
+        raise ModelMetadataError(
+            f"Failed to load model metadata from OpenRouter: {_load_error}. "
+            "Call clear_cache() to reset and retry."
+        )
     
     _load_attempted = True
     
     if not _AIOHTTP_AVAILABLE:
-        raise ModelMetadataError("aiohttp not installed. Install with: pip install aiohttp")
+        _load_error = "aiohttp not installed. Install with: pip install aiohttp"
+        raise ModelMetadataError(_load_error)
     
     url = "https://openrouter.ai/api/v1/models"
     
@@ -57,9 +64,9 @@ async def _load_from_openrouter() -> dict[str, ModelMetadata]:
                 url, timeout=aiohttp.ClientTimeout(total=30)
             ) as resp:
                 if resp.status != 200:
-                    raise ModelMetadataError(
-                        f"OpenRouter API returned status {resp.status}"
-                    )
+                    _load_error = f"OpenRouter API returned status {resp.status}"
+                    logger.error("%s", _load_error)
+                    raise ModelMetadataError(_load_error)
                 
                 data = await resp.json()
                 for model_entry in data.get("data", []):
@@ -85,7 +92,9 @@ async def _load_from_openrouter() -> dict[str, ModelMetadata]:
                         _api_metadata[short_key] = meta
                 
                 if not _api_metadata:
-                    raise ModelMetadataError("No models loaded from OpenRouter API")
+                    _load_error = "No models in OpenRouter API response"
+                    logger.error("%s", _load_error)
+                    raise ModelMetadataError(_load_error)
                 
                 logger.info(
                     "Loaded %d models from OpenRouter API",
@@ -94,9 +103,12 @@ async def _load_from_openrouter() -> dict[str, ModelMetadata]:
     except ModelMetadataError:
         raise
     except Exception as e:
+        _load_error = str(e)
+        logger.error("Failed to fetch model metadata from OpenRouter: %s", e)
         raise ModelMetadataError(f"Failed to fetch model metadata from OpenRouter: {e}")
     
     _loaded = True
+    _load_error = None
     return _api_metadata
 
 

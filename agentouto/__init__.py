@@ -12,6 +12,7 @@ from agentouto.context import Attachment
 from agentouto.event_log import AgentEvent, EventLog
 from agentouto.exceptions import AuthError
 from agentouto.message import Message
+from agentouto.model_metadata import clear_cache
 from agentouto.provider import Provider
 from agentouto.runtime import RunResult, async_run, run
 from agentouto.streaming import StreamEvent, async_run_stream
@@ -26,6 +27,7 @@ __all__ = [
     "AuthError",
     "AuthMethod",
     "ClaudeOAuth",
+    "clear_cache",
     "EventLog",
     "GoogleOAuth",
     "Message",
