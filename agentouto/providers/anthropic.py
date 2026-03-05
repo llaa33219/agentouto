@@ -69,7 +69,7 @@ class AnthropicBackend(ProviderBackend):
         messages = _build_messages(context)
         anthropic_tools = _build_tools(tools)
 
-        max_tokens = resolve_max_output_tokens(agent.model, agent.max_output_tokens)
+        max_tokens = await resolve_max_output_tokens(agent.model, agent.max_output_tokens)
         if max_tokens is None:
             max_tokens = _DEFAULT_MAX_TOKENS
 

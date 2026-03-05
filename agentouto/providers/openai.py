@@ -47,7 +47,7 @@ class OpenAIBackend(ProviderBackend):
             "messages": messages,
             **agent.extra,
         }
-        max_tokens = resolve_max_output_tokens(agent.model, agent.max_output_tokens)
+        max_tokens = await resolve_max_output_tokens(agent.model, agent.max_output_tokens)
         if max_tokens is not None:
             params["max_completion_tokens"] = max_tokens
         if openai_tools:
@@ -99,7 +99,7 @@ class OpenAIBackend(ProviderBackend):
             "stream": True,
             **agent.extra,
         }
-        max_tokens = resolve_max_output_tokens(agent.model, agent.max_output_tokens)
+        max_tokens = await resolve_max_output_tokens(agent.model, agent.max_output_tokens)
         if max_tokens is not None:
             params["max_completion_tokens"] = max_tokens
         if openai_tools:

@@ -48,7 +48,7 @@ class GoogleBackend(ProviderBackend):
         gen_config: dict[str, Any] = {
             "temperature": agent.temperature,
         }
-        max_tokens = resolve_max_output_tokens(agent.model, agent.max_output_tokens)
+        max_tokens = await resolve_max_output_tokens(agent.model, agent.max_output_tokens)
         if max_tokens is not None:
             gen_config["max_output_tokens"] = max_tokens
         if agent.reasoning:

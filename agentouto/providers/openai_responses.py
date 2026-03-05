@@ -49,7 +49,7 @@ class OpenAIResponsesBackend(ProviderBackend):
             "instructions": context.system_prompt,
             **agent.extra,
         }
-        max_tokens = resolve_max_output_tokens(agent.model, agent.max_output_tokens)
+        max_tokens = await resolve_max_output_tokens(agent.model, agent.max_output_tokens)
         if max_tokens is not None:
             params["max_output_tokens"] = max_tokens
         if response_tools:
@@ -86,7 +86,7 @@ class OpenAIResponsesBackend(ProviderBackend):
             "stream": True,
             **agent.extra,
         }
-        max_tokens = resolve_max_output_tokens(agent.model, agent.max_output_tokens)
+        max_tokens = await resolve_max_output_tokens(agent.model, agent.max_output_tokens)
         if max_tokens is not None:
             params["max_output_tokens"] = max_tokens
         if response_tools:

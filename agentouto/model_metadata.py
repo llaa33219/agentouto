@@ -126,10 +126,11 @@ def get_model_info(model: str) -> ModelMetadata:
     )
 
 
-def resolve_max_output_tokens(model: str, user_value: int | None) -> int | None:
+async def resolve_max_output_tokens(model: str, user_value: int | None) -> int | None:
     if user_value is not None:
         return user_value
     
+    await ensure_loaded()
     info = get_model_info(model)
     if info.max_output_tokens:
         return info.max_output_tokens
