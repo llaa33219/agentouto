@@ -129,24 +129,19 @@ class ModelMetadata:
     context_window: int
     max_output_tokens: int | None = None
 
-def get_model_info(model: str) -> ModelMetadata | None
+class ModelMetadataError(Exception): ...
+
+def get_model_info(model: str) -> ModelMetadata
 def resolve_max_output_tokens(model: str, user_value: int | None) -> int | None
 async def ensure_loaded() -> None
 ```
 
-**메타데이터 소스**:
-1. **최소 폴백**: 주요 모델만 하드코딩 (gpt-5, gpt-4o, claude-opus-4-6, claude-sonnet-4-6, gemini-2.5-pro)
-2. **OpenRouter API**: 무료로 1000+ 모델의 최신 메타데이터 실시간 Fetch (API Key 불필요)
+**메타데이터 소스**: OpenRouter API만 사용 (무료, API Key 불필요)
 
 **동작 방식**:
-- `agent.max_output_tokens`가 `None`이면 모델 메타데이터에서 자동 결정
-- OpenRouter API에서 실시간 Fetch (무료, API Key 불필요)
-- 실패 시 폴백 사용
-
-**지원 모델 예시**:
-- OpenAI: gpt-5 (400K context, 128K output), gpt-4o (128K context, 16K output)
-- Anthropic: claude-opus-4-6 (200K context, 32K output), claude-sonnet-4-6 (200K context, 32K output)
-- Google: gemini-2.5-pro (1M context, 64K output), gemini-1.5-pro (2M context)
+- OpenRouter API에서 실시간 Fetch
+- 모델을 찾지 못하면 `ModelMetadataError` 예외 발생
+- 폴백 없음 - 반드시 OpenRouter에 모델이 존재해야 함
 
 ### `message.py` — Message
 
