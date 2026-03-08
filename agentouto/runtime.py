@@ -81,7 +81,7 @@ class Runtime:
         })
 
         output = await self._run_agent_loop(
-            agent, forward_message, call_id, None, attachments=attachments
+            agent, forward_message, call_id, None, "user", attachments=attachments
         )
 
         self._messages.append(
@@ -116,10 +116,11 @@ class Runtime:
         forward_message: str,
         call_id: str,
         parent_call_id: str | None,
+        caller: str | None = None,
         *,
         attachments: list[Attachment] | None = None,
     ) -> str:
-        system_prompt = self._router.build_system_prompt(agent)
+        system_prompt = self._router.build_system_prompt(agent, caller=caller)
         context = Context(system_prompt)
         context.add_user(forward_message, attachments=attachments)
         tool_schemas = self._router.build_tool_schemas(agent.name)
@@ -228,7 +229,7 @@ class Runtime:
             })
 
             result = await self._run_agent_loop(
-                target, message, sub_call_id, caller_call_id
+                target, message, sub_call_id, caller_call_id, caller_name
             )
 
             self._messages.append(
@@ -319,7 +320,7 @@ class Runtime:
 
         output = ""
         async for event in self._stream_agent_loop(
-            agent, forward_message, call_id, None, attachments=attachments
+            agent, forward_message, call_id, None, "user", attachments=attachments
         ):
             if event.type == "finish":
                 output = event.data.get("output", "")
@@ -341,12 +342,13 @@ class Runtime:
         forward_message: str,
         call_id: str,
         parent_call_id: str | None,
+        caller: str | None = None,
         *,
         attachments: list[Attachment] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         from agentouto.streaming import StreamEvent
 
-        system_prompt = self._router.build_system_prompt(agent)
+        system_prompt = self._router.build_system_prompt(agent, caller=caller)
         context = Context(system_prompt)
         context.add_user(forward_message, attachments=attachments)
         tool_schemas = self._router.build_tool_schemas(agent.name)
@@ -424,7 +426,7 @@ class Runtime:
 
                         sub_result = ""
                         async for sub_event in self._stream_agent_loop(
-                            target, msg, sub_call_id, call_id
+                            target, msg, sub_call_id, call_id, agent.name
                         ):
                             yield sub_event
                             if sub_event.type == "finish":

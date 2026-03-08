@@ -96,18 +96,38 @@ class Router:
 
         return schemas
 
-    def build_system_prompt(self, agent: Agent) -> str:
+    def build_system_prompt(self, agent: Agent, caller: str | None = None) -> str:
         other_agents = [
             a for a in self._agents.values() if a.name != agent.name
         ]
 
         lines = [f'You are "{agent.name}". {agent.instructions}']
 
+        if caller:
+            lines.append("")
+            lines.append(f"INVOKED BY: You have been called by '{caller}'. ")
+            lines.append("Consider their request carefully and fulfill it to the best of your ability.")
+
         if other_agents:
             lines.append("")
             lines.append("Available agents:")
             for a in other_agents:
                 lines.append(f"- {a.name}: {a.instructions}")
+
+        lines.append("")
+        lines.append("PARALLEL EXECUTION:")
+        lines.append("- You can call MULTIPLE agents AT ONCE by including multiple call_agent tool calls in your single response.")
+        lines.append("- When you call multiple agents simultaneously, they execute in PARALLEL — this is MUCH FASTER than sequential calls.")
+        lines.append("- Use parallel execution when: tasks are independent, you need diverse perspectives, or gathering information from multiple sources.")
+        lines.append("- Example: One response with 3 call_agent calls = 3 agents working simultaneously.")
+
+        lines.append("")
+        lines.append("COLLABORATION GUIDELINES:")
+        lines.append("- Be enthusiastic about collaborating with other agents — teamwork makes the work better.")
+        lines.append("- Follow your role precisely — stay true to your defined purpose and expertise.")
+        lines.append("- When asked to collaborate, engage actively and contribute your best work.")
+        lines.append("- Delegate tasks to other agents when it improves the result.")
+        lines.append("- Provide constructive feedback to help other agents improve their work.")
 
         lines.append("")
         lines.append(

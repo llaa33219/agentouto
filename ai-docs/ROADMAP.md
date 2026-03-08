@@ -8,9 +8,9 @@
 
 ## 1. 현재 상태
 
-**버전:** 0.11.0 (공개)
+**버전:** 0.18.0 (공개)
 
-**최종 업데이트:** Phase 15 완료 — OAuth 인증 (OpenAI, Claude, Google)
+**최종 업데이트:** 시스템 프롬프트 강화 — 호출자 정보, 병렬 실행 가이드, 협업 가이드라인 추가
 
 ---
 
@@ -212,6 +212,16 @@
 ---
 
 ## 5. 변경 이력
+
+### 0.18.0 (시스템 프롬프트 강화)
+
+- router.py: `build_system_prompt()`에 `caller` 파라미터 추가
+- runtime.py: 에이전트 호출 시 호출자 정보 전달 (`_run_agent_loop`, `_execute_tool_call`, streaming 버전)
+- 시스템 프롬프트에 INVOKED BY 섹션 추가 — 호출한 에이전트 표시
+- 시스템 프롬프트에 PARALLEL EXECUTION 가이드 추가 — 여러 에이전트 동시 호출 방법 명시
+- 시스템 프롬프트에 COLLABORATION GUIDELINES 추가 — 협업, 역할 준수, 적극적 참여 지시
+- MESSAGE_PROTOCOL.md 시스템 프롬프트 예시 업데이트
+- 테스트 173개
 
 ### 0.11.0 (Phase 15: OAuth 인증)
 
