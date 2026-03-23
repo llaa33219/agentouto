@@ -494,20 +494,16 @@ class Runtime:
                 )
                 for tc in response.tool_calls
             ]
-            # Run all tool calls concurrently and collect all events
             all_events = await asyncio.gather(*tool_call_tasks, return_exceptions=True)
-            # Yield events in the order they were collected
-            for events in all_events:
-                if isinstance(events, Exception):
-                    # This shouldn't happen since we handle exceptions internally,
-                    # but yield it as an error event if it does
+            for item in all_events:
+                if isinstance(item, Exception):
                     yield StreamEvent(
                         type="error",
                         agent_name=agent.name,
-                        data={"error": f"Unexpected error: {events}"},
+                        data={"error": f"Unexpected error: {item}"},
                     )
-                elif events is not None:
-                    for event in events:
+                else:
+                    for event in item:  # type: ignore[union-attr]
                         yield event
 
     # --- Helpers ---
