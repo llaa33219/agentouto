@@ -452,9 +452,11 @@ class Trace:
 ```python
 @dataclass
 class StreamEvent:
-    type: Literal["token", "tool_call", "agent_call", "agent_return", "finish", "error"]
+    type: Literal["token", "tool_call", "tool_result", "agent_call", "agent_return", "finish", "error"]
     agent_name: str
-    data: dict[str, Any]
+    call_id: str                          # uuid4 — 에이전트 호출 고유 ID
+    parent_call_id: str | None            # 부모 호출 ID (呼叫 체인 추적)
+    data: dict[str, Any] = field(default_factory=dict)
 
 async def async_run_stream(entry, message, agents, tools, providers, *, attachments=None) -> AsyncIterator[StreamEvent]
 ```

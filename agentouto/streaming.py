@@ -23,6 +23,8 @@ class StreamEvent:
         "error",
     ]
     agent_name: str
+    call_id: str
+    parent_call_id: str | None
     data: dict[str, Any] = field(default_factory=dict)
 
 

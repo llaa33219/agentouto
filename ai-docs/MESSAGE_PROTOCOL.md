@@ -388,6 +388,7 @@ print(result.trace.print_tree())
 | 추적 수준 | 데이터 | 항상 가능 | debug=True 필요 |
 |-----------|--------|-----------|-----------------|
 | Message.call_id | `RunResult.messages` | ✅ | ❌ |
+| StreamEvent.call_id | streaming events | ✅ | ❌ |
 | EventLog | `result.event_log` | ❌ | ✅ |
 | Trace | `result.trace` | ❌ | ✅ |
 

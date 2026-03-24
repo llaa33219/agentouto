@@ -454,6 +454,8 @@ class Runtime:
                     yield StreamEvent(
                         type="token",
                         agent_name=agent.name,
+                        call_id=call_id,
+                        parent_call_id=parent_call_id,
                         data={"text": chunk},
                     )
                 else:
@@ -463,6 +465,8 @@ class Runtime:
                 yield StreamEvent(
                     type="error",
                     agent_name=agent.name,
+                    call_id=call_id,
+                    parent_call_id=parent_call_id,
                     data={"error": "No response from LLM"},
                 )
                 return
@@ -481,6 +485,8 @@ class Runtime:
                 yield StreamEvent(
                     type="finish",
                     agent_name=agent.name,
+                    call_id=call_id,
+                    parent_call_id=parent_call_id,
                     data={"output": finish_call.arguments.get("message", "")},
                 )
                 return
@@ -490,7 +496,7 @@ class Runtime:
             # Process tool calls in parallel using asyncio.gather
             tool_call_tasks = [
                 self._execute_streaming_tool_call(
-                    tc, agent.name, call_id, context
+                    tc, agent.name, call_id, parent_call_id, context
                 )
                 for tc in response.tool_calls
             ]
@@ -500,6 +506,8 @@ class Runtime:
                     yield StreamEvent(
                         type="error",
                         agent_name=agent.name,
+                        call_id=call_id,
+                        parent_call_id=parent_call_id,
                         data={"error": f"Unexpected error: {item}"},
                     )
                 else:
@@ -527,6 +535,7 @@ class Runtime:
         tc: ToolCall,
         caller_name: str,
         caller_call_id: str,
+        parent_call_id: str | None,
         context: Context,
     ) -> list[StreamEvent]:
         from agentouto.streaming import StreamEvent
@@ -543,6 +552,8 @@ class Runtime:
                 events.append(StreamEvent(
                     type="error",
                     agent_name=caller_name,
+                    call_id=caller_call_id,
+                    parent_call_id=parent_call_id,
                     data={"error": str(exc)},
                 ))
                 return events
@@ -561,6 +572,8 @@ class Runtime:
                 events.append(StreamEvent(
                     type="agent_call",
                     agent_name=target_name,
+                    call_id=sub_call_id,
+                    parent_call_id=caller_call_id,
                     data={"from": caller_name, "message": _truncate(msg)},
                 ))
 
@@ -584,6 +597,8 @@ class Runtime:
                 events.append(StreamEvent(
                     type="agent_return",
                     agent_name=target_name,
+                    call_id=sub_call_id,
+                    parent_call_id=caller_call_id,
                     data={"result": _truncate(sub_result)},
                 ))
                 context.add_tool_result(tc.id, tc.name, sub_result)
@@ -592,6 +607,8 @@ class Runtime:
                 events.append(StreamEvent(
                     type="error",
                     agent_name=caller_name,
+                    call_id=sub_call_id,
+                    parent_call_id=caller_call_id,
                     data={"error": str(exc)},
                 ))
         else:
@@ -602,6 +619,8 @@ class Runtime:
                 events.append(StreamEvent(
                     type="error",
                     agent_name=caller_name,
+                    call_id=caller_call_id,
+                    parent_call_id=parent_call_id,
                     data={"error": str(exc)},
                 ))
                 return events
@@ -609,6 +628,8 @@ class Runtime:
             events.append(StreamEvent(
                 type="tool_call",
                 agent_name=caller_name,
+                call_id=caller_call_id,
+                parent_call_id=parent_call_id,
                 data={"tool_name": tc.name, "arguments": tc.arguments},
             ))
             try:
@@ -636,6 +657,8 @@ class Runtime:
                 events.append(StreamEvent(
                     type="tool_result",
                     agent_name=caller_name,
+                    call_id=caller_call_id,
+                    parent_call_id=parent_call_id,
                     data={
                         "tool_name": tc.name,
                         "result": result.content,
@@ -647,6 +670,8 @@ class Runtime:
                 events.append(StreamEvent(
                     type="tool_result",
                     agent_name=caller_name,
+                    call_id=caller_call_id,
+                    parent_call_id=parent_call_id,
                     data={"tool_name": tc.name, "result": str(result)},
                 ))
 

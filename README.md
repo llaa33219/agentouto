@@ -549,6 +549,8 @@ async for event in async_run_stream(
         print(event.data["token"], end="", flush=True)
     elif event.type == "finish":
         print(f"\n--- {event.agent_name} finished ---")
+    # call_id and parent_call_id are available on all events for tracing
+    print(f"[{event.type}] call_id={event.call_id[:8]} parent={event.parent_call_id}")
 ```
 
 Streaming also supports history:
