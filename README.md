@@ -472,6 +472,91 @@ for msg in result.messages:
         print(f"call_id={msg.call_id[:8]}: {msg.content[:50]}...")
 ```
 
+### Background Execution — Isolated Agent Loops
+
+Agents can run in **isolated background loops** that can receive messages while running. This enables true concurrent agents that can communicate during execution.
+
+#### Spawning Background Agents
+
+Use `call_agent` with `background=True`, or use `spawn_background_agent` directly:
+
+```python
+# Spawn an agent in background — returns immediately with task_id
+call_agent(
+    agent_name="writer",
+    message="Write a report on AI trends.",
+    background=True,
+)
+# Returns: "Background agent started. Task ID: bg_abc123"
+
+# Or use spawn_background_agent directly
+spawn_background_agent(
+    agent_name="researcher",
+    message="Research the latest in AI.",
+)
+```
+
+#### Sending Messages to Running Agents
+
+Use `send_message` to inject messages into a running background agent:
+
+```python
+# Send a message to the running agent
+send_message(
+    task_id="bg_abc123",
+    message="Add a section about GPT-5.",
+)
+# Returns: "Message sent to writer (task_id: bg_abc123)"
+```
+
+The agent receives the message as a new user input in its running loop.
+
+#### Getting Status and Messages
+
+Use `get_messages` to check on a background agent:
+
+```python
+# Retrieve status, result, and all messages
+get_messages(task_id="bg_abc123", clear=False)
+# Returns:
+# Task ID: bg_abc123
+# Agent: writer
+# Status: running
+# Messages (3):
+#   [forward] user -> writer: Write a report...
+#   [return] writer -> user: Here's the report...
+```
+
+#### Background vs Parallel Calls
+
+| Aspect | `asyncio.gather` Parallel | Background Loops |
+|--------|---------------------------|------------------|
+| Execution | Same loop iteration | Isolated loops |
+| Communication | Results only after completion | Real-time messages |
+| Independence | Share context | Own context |
+| Use case | Fast parallel tasks | Long-running concurrent agents |
+
+#### Example: Concurrent Research and Writing
+
+```python
+# Agent A spawns Agent B in background, continues working,
+# then sends additional instructions to B
+
+# Agent A's actions:
+# 1. call_agent(agent_name="researcher", message="Research AI", background=True)
+#    → Returns "Task ID: bg_res_001"
+#
+# 2. Do other work in parallel...
+#
+# 3. send_message(task_id="bg_res_001", message="Also look at GPT-5")
+#
+# 4. get_messages(task_id="bg_res_001")
+```
+
+See [`ai-docs/MESSAGE_PROTOCOL.md`](./ai-docs/MESSAGE_PROTOCOL.md#11-백그라운드-실행--background-execution) for detailed protocol documentation.
+
+---
+
 ### Debug Mode (Optional)
 
 For structured event logs and call tree visualization, enable `debug=True`:
@@ -581,6 +666,7 @@ agentouto/
 ├── context.py           # Attachment, ContextMessage, per-agent conversation context
 ├── router.py            # Message routing, system prompt generation, tool schema building
 ├── runtime.py           # Agent loop engine, parallel execution, run()/async_run()
+├── loop_manager.py      # Background agent loops, message queues, AgentLoopRegistry
 ├── streaming.py         # async_run_stream(), StreamEvent
 ├── event_log.py         # AgentEvent, EventLog — structured event recording
 ├── tracing.py           # Trace, Span — call tree builder from event logs
@@ -621,6 +707,7 @@ agentouto/
 | **13** | OpenAI Responses API backend (`openai_responses`) | ✅ Done |
 | **15** | OAuth authentication (OpenAI, Claude, Google) | ✅ Done |
 | **16** | Conversation history (`history` parameter) | ✅ Done |
+| **17** | Background execution + inter-agent messaging | ✅ Done |
 
 ---
 

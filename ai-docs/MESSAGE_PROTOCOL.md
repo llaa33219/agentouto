@@ -291,6 +291,83 @@ A(call_agent B) → B(call_agent A) → A(call_agent A) → A(finish) → A(fini
 
 ---
 
+## 11. 백그라운드 실행 — Background Execution
+
+에이전트를 백그라운드에서 실행하고 다른 루프의 에이전트와 통신할 수 있다.
+
+### 백그라운드 에이전트 스폰
+
+`call_agent`에 `background=True`를 사용하거나 `spawn_background_agent` 도구를 사용:
+
+```
+call_agent(agent_name="writer", message="...", background=True)
+→ "Background agent started. Task ID: bg_abc123"
+```
+
+### 메시지 보내기 — send_message
+
+백그라운드 에이전트가 실행 중일 때 메시지 주입:
+
+```
+send_message(task_id="bg_abc123", message="追加の指示")
+→ "Message sent to writer (task_id: bg_abc123)"
+```
+
+에이전트는 받은 메시지를 사용자 입력으로 수신한다.
+
+### 결과 조회 — get_messages
+
+백그라운드 에이전트의 상태와 메시지 조회:
+
+```
+get_messages(task_id="bg_abc123", clear=False)
+→ "Task ID: bg_abc123
+   Agent: writer
+   Status: running
+   Messages (3):
+     [forward] user -> writer: ...
+     [return] writer -> user: ..."
+```
+
+### 격리된 루프 간 통신 다이어그램
+
+```
+[Agent A - Main Loop]
+     │
+     ├── call_agent(agent_name="B", background=True)
+     │        │
+     │        ▼ (non-blocking, returns task_id immediately)
+     │
+     │   [Agent B - Background Loop 1]
+     │        │
+     ├── send_message(task_id="bg_...", message="...")
+     │        │  ← Message injected as user input
+     │        ▼
+     │   [Agent B receives message]
+     │        │
+     │        ▼
+     │   get_messages(task_id="bg_...") → status, messages
+     │
+     └── continues working...
+
+
+[Agent C - Background Loop 2] ← 다른 백그라운드 에이전트도 독립 실행
+```
+
+### 중요: 백그라운드 ≠ 비동기
+
+백그라운드 에이전트는:
+- 별도의 루프 인스턴스에서 실행
+- 자신만의 Context 보유
+- 다른 백그라운드 에이전트와 동시에 실행 가능
+- `send_message`로 런타임에 메시지 주입 가능
+
+기존 `asyncio.gather` 병렬 호출과의 차이:
+- `asyncio.gather`: 같은 루프 iteration에서 여러 도구/에이전트를 동시 실행
+- 백그라운드: 완전히 별개의 루프에서 독립적 에이전트 실행 + 통신 가능
+
+---
+
 ## 10. 병렬로 호출된 동일 이름 에이전트 추적
 
 같은 이름의 에이전트가 여러 번 병렬로 호출되어도, 각 호출은 고유한 `call_id`로 구분된다.

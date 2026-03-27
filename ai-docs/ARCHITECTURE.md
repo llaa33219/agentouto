@@ -26,6 +26,7 @@ agentouto/
 ├── model_metadata.py    # 모델 메타데이터 (context_window, max_output_tokens)
 ├── provider.py          # Provider 데이터클래스
 ├── router.py            # 메시지 라우팅, 시스템 프롬프트, 도구 스키마
+├── loop_manager.py      # Background agent loops, message queues, registry
 ├── runtime.py           # 에이전트 루프 엔진, 병렬 실행, 스트리밍, run()/async_run()
 ├── streaming.py         # 스트리밍 인터페이스 (StreamEvent, async_run_stream)
 ├── summarizer.py        # 컨텍스트 요약 (토큰 추정, 경계 탐색, 요약 프롬프트 생성)
@@ -290,12 +291,62 @@ class Router:
 
 **도구 스키마 자동 생성:**
 - 사용자 정의 도구 스키마 전체
-- `call_agent` 도구 (agent_name, message 파라미터)
+- `call_agent` 도구 (agent_name, message, background 파라미터)
+- `spawn_background_agent` 도구 (agent_name, message, history 파라미터) → task_id 반환
+- `send_message` 도구 (task_id, message 파라미터) → 전송 확인 반환
+- `get_messages` 도구 (task_id, clear 파라미터) → status + messages 반환
 - `finish` 도구 (message 파라미터)
 
 **프로바이더 백엔드 캐싱:**
 - `_backends` 딕셔너리로 kind별 백엔드 인스턴스 캐싱
 - `get_backend(kind)` 팩토리로 lazy 생성
+
+### `loop_manager.py` — Background Agent Loop Manager
+
+```python
+class AgentLoopRegistry:      # Thread-safe singleton for tracking all background loops
+class MessageQueue:           # Per-agent async message queue (max 100 messages)
+class BackgroundAgentLoop:    # Wrapper for background agent execution
+class BackgroundResult:       # Dataclass for background task results
+```
+
+**AgentLoopRegistry** — Global singleton that tracks all running background agent loops:
+
+```python
+registry = AgentLoopRegistry.get_instance()  # Get singleton
+registry.register(task_id, bg_loop)          # Register a background loop
+registry.unregister(task_id)                 # Remove a loop
+registry.get_loop(task_id) -> BackgroundAgentLoop | None
+registry.get_task_ids() -> list[str]
+```
+
+**MessageQueue** — Async queue for inter-agent messages:
+
+```python
+queue: MessageQueue
+await queue.enqueue(message)   # Add message (drops oldest if full)
+await queue.dequeue(timeout)   # Blocking get (None if timeout)
+await queue.peek()             # View without consuming
+await queue.clear()            # Empty the queue
+```
+
+**BackgroundAgentLoop** — Wrapper for background execution:
+
+```python
+bg_loop: BackgroundAgentLoop
+bg_loop.start()                        # Begin execution
+bg_loop.inject_message(message)        # Inject message into running loop
+bg_loop.get_status() -> LoopStatus     # "pending" | "running" | "completed" | "failed"
+await bg_loop.get_result() -> str      # Blocking get result
+bg_loop.get_messages(clear=False)      # Get all messages
+```
+
+**Background execution flow (how agents are spawned):**
+1. Router exposes `spawn_background_agent` (or `call_agent(background=True)`) in `build_tool_schemas()`.
+2. Runtime creates a `BackgroundAgentLoop` for the target agent call and registers it in `AgentLoopRegistry` with a generated `task_id`.
+3. `bg_loop.start()` runs the agent loop asynchronously while the caller continues immediately with `task_id`.
+4. Other agents can send messages to the running task via `send_message(task_id, message)`; messages are buffered in per-task `MessageQueue`.
+5. Callers poll `get_messages(task_id, clear=...)` for status/message snapshots and can await final output via `BackgroundAgentLoop.get_result()`.
 
 ### `runtime.py` — Runtime
 

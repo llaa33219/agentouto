@@ -53,7 +53,8 @@ class Router:
                 "name": CALL_AGENT,
                 "description": (
                     "Call another agent. The agent will process your message "
-                    "and return a result when done."
+                    "and return a result when done. Use background=True to run "
+                    "the agent in background and get a task_id immediately."
                 ),
                 "parameters": {
                     "type": "object",
@@ -83,8 +84,103 @@ class Router:
                                 "required": ["type", "sender", "receiver", "content"],
                             },
                         },
+                        "background": {
+                            "type": "boolean",
+                            "description": "If true, spawn the agent in background and return task_id immediately. The agent will run independently.",
+                            "default": False,
+                        },
                     },
                     "required": ["agent_name", "message"],
+                },
+            }
+        )
+
+        schemas.append(
+            {
+                "name": "spawn_background_agent",
+                "description": (
+                    "Spawn an agent to run in the background. Returns a task_id "
+                    "that can be used to send messages or retrieve results later."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "agent_name": {
+                            "type": "string",
+                            "description": "Name of the agent to spawn",
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "Initial message to send to the agent",
+                        },
+                        "history": {
+                            "type": "array",
+                            "description": "Optional conversation history to attach",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["forward", "return"],
+                                    },
+                                    "sender": {"type": "string"},
+                                    "receiver": {"type": "string"},
+                                    "content": {"type": "string"},
+                                },
+                                "required": ["type", "sender", "receiver", "content"],
+                            },
+                        },
+                    },
+                    "required": ["agent_name", "message"],
+                },
+            }
+        )
+
+        schemas.append(
+            {
+                "name": "send_message",
+                "description": (
+                    "Send a message to a background agent. The agent will receive "
+                    "it as a new user input in its running loop."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {
+                            "type": "string",
+                            "description": "Task ID of the background agent (from spawn_background_agent or call_agent with background=True)",
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "Message content to send",
+                        },
+                    },
+                    "required": ["task_id", "message"],
+                },
+            }
+        )
+
+        schemas.append(
+            {
+                "name": "get_messages",
+                "description": (
+                    "Retrieve messages from a background agent. Returns status, "
+                    "result (if completed), and all messages collected so far."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {
+                            "type": "string",
+                            "description": "Task ID of the background agent",
+                        },
+                        "clear": {
+                            "type": "boolean",
+                            "description": "If true, clear messages after retrieving",
+                            "default": False,
+                        },
+                    },
+                    "required": ["task_id"],
                 },
             }
         )

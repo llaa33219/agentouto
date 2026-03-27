@@ -12,6 +12,7 @@ from agentouto.agent import Agent
 from agentouto.context import Attachment, Context, ContextMessage, ToolCall
 from agentouto.event_log import AgentEvent, EventLog
 from agentouto.exceptions import RoutingError, ToolError
+from agentouto.loop_manager import AgentLoopRegistry, BackgroundAgentLoop
 from agentouto.message import Message
 from agentouto.provider import Provider
 from agentouto.router import Router
@@ -139,6 +140,7 @@ class Runtime:
         *,
         attachments: list[Attachment] | None = None,
         history: list[Message] | None = None,
+        loop_id: str | None = None,
     ) -> str:
         system_prompt = self._router.build_system_prompt(agent, caller=caller)
         context = Context(system_prompt)
@@ -152,6 +154,20 @@ class Runtime:
         tool_schemas = self._router.build_tool_schemas(agent.name)
 
         while True:
+            if loop_id:
+                registry = AgentLoopRegistry.get_instance()
+                bg_loop = registry.get_loop(loop_id)
+                if bg_loop:
+                    try:
+                        injected_msg = bg_loop.message_queue._queue.get_nowait()
+                        if injected_msg:
+                            context.add_user(
+                                injected_msg.content,
+                                attachments=injected_msg.attachments,
+                            )
+                    except asyncio.QueueEmpty:
+                        pass
+
             await self._maybe_summarize(context, agent)
 
             self._record(
@@ -255,6 +271,7 @@ class Runtime:
             agent_name = tc.arguments.get("agent_name", "")
             message = tc.arguments.get("message", "")
             history_arg = tc.arguments.get("history")
+            background = tc.arguments.get("background", False)
 
             history = None
             if history_arg and isinstance(history_arg, list):
@@ -291,8 +308,20 @@ class Runtime:
                 {
                     "from": caller_name,
                     "message": _truncate(message),
+                    "background": background,
                 },
             )
+
+            if background:
+                task_id = await self._spawn_background_agent(
+                    target,
+                    message,
+                    sub_call_id,
+                    caller_call_id,
+                    caller_name,
+                    history=history,
+                )
+                return f"Background agent started. Task ID: {task_id}"
 
             result = await self._run_agent_loop(
                 target,
@@ -322,6 +351,92 @@ class Runtime:
                 },
             )
             return result
+
+        if tc.name == "spawn_background_agent":
+            agent_name = tc.arguments.get("agent_name", "")
+            message = tc.arguments.get("message", "")
+            history_arg = tc.arguments.get("history")
+
+            history = None
+            if history_arg and isinstance(history_arg, list):
+                history = []
+                for h in history_arg:
+                    if isinstance(h, dict):
+                        history.append(
+                            Message(
+                                type=h.get("type", "forward"),
+                                sender=h.get("sender", ""),
+                                receiver=h.get("receiver", ""),
+                                content=h.get("content", ""),
+                                call_id=uuid.uuid4().hex,
+                            )
+                        )
+
+            target = self._resolve_agent_target(agent_name)
+            task_id = await self._spawn_background_agent(
+                target,
+                message,
+                uuid.uuid4().hex,
+                caller_call_id,
+                caller_name,
+                history=history,
+            )
+            return f"Background agent started. Task ID: {task_id}"
+
+        if tc.name == "send_message":
+            task_id = tc.arguments.get("task_id", "")
+            message = tc.arguments.get("message", "")
+
+            registry = AgentLoopRegistry.get_instance()
+            bg_loop = registry.get_loop(task_id)
+
+            if bg_loop is None:
+                return f"Error: No background agent found with task_id: {task_id}"
+
+            msg = Message(
+                type="forward",
+                sender=caller_name,
+                receiver=bg_loop.agent.name,
+                content=message,
+                call_id=uuid.uuid4().hex,
+            )
+
+            await bg_loop.inject_message(msg)
+            return f"Message sent to {bg_loop.agent.name} (task_id: {task_id})"
+
+        if tc.name == "get_messages":
+            task_id = tc.arguments.get("task_id", "")
+            clear = tc.arguments.get("clear", False)
+
+            registry = AgentLoopRegistry.get_instance()
+            bg_loop = registry.get_loop(task_id)
+
+            if bg_loop is None:
+                return f"Error: No background agent found with task_id: {task_id}"
+
+            status = bg_loop.get_status()
+            messages = bg_loop.get_messages(clear=clear)
+
+            result_parts = [
+                f"Task ID: {task_id}",
+                f"Agent: {bg_loop.agent.name}",
+                f"Status: {status}",
+            ]
+
+            if bg_loop.result is not None:
+                result_parts.append(f"Result: {bg_loop.result}")
+
+            if bg_loop.error is not None:
+                result_parts.append(f"Error: {bg_loop.error}")
+
+            if messages:
+                result_parts.append(f"Messages ({len(messages)}):")
+                for msg in messages:
+                    result_parts.append(
+                        f"  [{msg.type}] {msg.sender} -> {msg.receiver}: {msg.content[:100]}"
+                    )
+
+            return "\n".join(result_parts)
 
         self._record(
             "tool_exec",
@@ -373,6 +488,43 @@ class Runtime:
                 )
         except Exception as exc:
             logger.warning("[%s] Self-summarization failed: %s", agent.name, exc)
+
+    async def _spawn_background_agent(
+        self,
+        agent: Agent,
+        forward_message: str,
+        call_id: str,
+        parent_call_id: str | None,
+        caller: str | None = None,
+        history: list[Message] | None = None,
+    ) -> str:
+        task_id = f"bg_{uuid.uuid4().hex[:12]}"
+
+        async def executor(agnt: Agent, msg: str, hist: list[Message] | None) -> str:
+            return await self._run_agent_loop(
+                agnt,
+                msg,
+                call_id,
+                parent_call_id,
+                caller,
+                history=hist,
+                loop_id=task_id,
+            )
+
+        bg_loop = BackgroundAgentLoop(
+            agent=agent,
+            initial_message=forward_message,
+            history=history,
+            executor=executor,
+            task_id=task_id,
+        )
+
+        registry = AgentLoopRegistry.get_instance()
+        registry.register(task_id, bg_loop)
+
+        bg_loop.start()
+
+        return task_id
 
     # --- Streaming ---
 
@@ -549,13 +701,15 @@ class Runtime:
                 target = self._resolve_agent_target(target_name)
             except Exception as exc:
                 context.add_tool_result(tc.id, tc.name, f"Error: {exc}")
-                events.append(StreamEvent(
-                    type="error",
-                    agent_name=caller_name,
-                    call_id=caller_call_id,
-                    parent_call_id=parent_call_id,
-                    data={"error": str(exc)},
-                ))
+                events.append(
+                    StreamEvent(
+                        type="error",
+                        agent_name=caller_name,
+                        call_id=caller_call_id,
+                        parent_call_id=parent_call_id,
+                        data={"error": str(exc)},
+                    )
+                )
                 return events
 
             try:
@@ -569,13 +723,15 @@ class Runtime:
                         call_id=sub_call_id,
                     )
                 )
-                events.append(StreamEvent(
-                    type="agent_call",
-                    agent_name=target_name,
-                    call_id=sub_call_id,
-                    parent_call_id=caller_call_id,
-                    data={"from": caller_name, "message": _truncate(msg)},
-                ))
+                events.append(
+                    StreamEvent(
+                        type="agent_call",
+                        agent_name=target_name,
+                        call_id=sub_call_id,
+                        parent_call_id=caller_call_id,
+                        data={"from": caller_name, "message": _truncate(msg)},
+                    )
+                )
 
                 sub_result = ""
                 async for sub_event in self._stream_agent_loop(
@@ -594,44 +750,52 @@ class Runtime:
                         call_id=sub_call_id,
                     )
                 )
-                events.append(StreamEvent(
-                    type="agent_return",
-                    agent_name=target_name,
-                    call_id=sub_call_id,
-                    parent_call_id=caller_call_id,
-                    data={"result": _truncate(sub_result)},
-                ))
+                events.append(
+                    StreamEvent(
+                        type="agent_return",
+                        agent_name=target_name,
+                        call_id=sub_call_id,
+                        parent_call_id=caller_call_id,
+                        data={"result": _truncate(sub_result)},
+                    )
+                )
                 context.add_tool_result(tc.id, tc.name, sub_result)
             except Exception as exc:
                 context.add_tool_result(tc.id, tc.name, f"Error: {exc}")
-                events.append(StreamEvent(
-                    type="error",
-                    agent_name=caller_name,
-                    call_id=sub_call_id,
-                    parent_call_id=caller_call_id,
-                    data={"error": str(exc)},
-                ))
+                events.append(
+                    StreamEvent(
+                        type="error",
+                        agent_name=caller_name,
+                        call_id=sub_call_id,
+                        parent_call_id=caller_call_id,
+                        data={"error": str(exc)},
+                    )
+                )
         else:
             try:
                 tool = self._resolve_tool_target(tc.name)
             except Exception as exc:
                 context.add_tool_result(tc.id, tc.name, f"Error: {exc}")
-                events.append(StreamEvent(
-                    type="error",
+                events.append(
+                    StreamEvent(
+                        type="error",
+                        agent_name=caller_name,
+                        call_id=caller_call_id,
+                        parent_call_id=parent_call_id,
+                        data={"error": str(exc)},
+                    )
+                )
+                return events
+
+            events.append(
+                StreamEvent(
+                    type="tool_call",
                     agent_name=caller_name,
                     call_id=caller_call_id,
                     parent_call_id=parent_call_id,
-                    data={"error": str(exc)},
-                ))
-                return events
-
-            events.append(StreamEvent(
-                type="tool_call",
-                agent_name=caller_name,
-                call_id=caller_call_id,
-                parent_call_id=parent_call_id,
-                data={"tool_name": tc.name, "arguments": tc.arguments},
-            ))
+                    data={"tool_name": tc.name, "arguments": tc.arguments},
+                )
+            )
             try:
                 result = await tool.execute(**tc.arguments)
             except Exception as exc:
@@ -654,26 +818,30 @@ class Runtime:
                         }
                         for att in result.attachments
                     ]
-                events.append(StreamEvent(
-                    type="tool_result",
-                    agent_name=caller_name,
-                    call_id=caller_call_id,
-                    parent_call_id=parent_call_id,
-                    data={
-                        "tool_name": tc.name,
-                        "result": result.content,
-                        "attachments": attachments_data,
-                    },
-                ))
+                events.append(
+                    StreamEvent(
+                        type="tool_result",
+                        agent_name=caller_name,
+                        call_id=caller_call_id,
+                        parent_call_id=parent_call_id,
+                        data={
+                            "tool_name": tc.name,
+                            "result": result.content,
+                            "attachments": attachments_data,
+                        },
+                    )
+                )
             else:
                 context.add_tool_result(tc.id, tc.name, result)
-                events.append(StreamEvent(
-                    type="tool_result",
-                    agent_name=caller_name,
-                    call_id=caller_call_id,
-                    parent_call_id=parent_call_id,
-                    data={"tool_name": tc.name, "result": str(result)},
-                ))
+                events.append(
+                    StreamEvent(
+                        type="tool_result",
+                        agent_name=caller_name,
+                        call_id=caller_call_id,
+                        parent_call_id=parent_call_id,
+                        data={"tool_name": tc.name, "result": str(result)},
+                    )
+                )
 
         return events
 
