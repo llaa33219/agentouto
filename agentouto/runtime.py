@@ -161,86 +161,90 @@ class Runtime:
         context.add_user(forward_message, attachments=attachments)
         tool_schemas = self._router.build_tool_schemas(agent.name)
 
-        while True:
-            try:
-                injected_msg = registered_loop.message_queue._queue.get_nowait()
-                if injected_msg:
-                    context.add_user(
-                        injected_msg.content,
-                        attachments=injected_msg.attachments,
-                    )
-            except asyncio.QueueEmpty:
-                pass
+        try:
+            while True:
+                try:
+                    injected_msg = registered_loop.message_queue._queue.get_nowait()
+                    if injected_msg:
+                        context.add_user(
+                            injected_msg.content,
+                            attachments=injected_msg.attachments,
+                        )
+                except asyncio.QueueEmpty:
+                    pass
 
-            await self._maybe_summarize(context, agent)
+                await self._maybe_summarize(context, agent)
 
-            self._record(
-                "llm_call",
-                agent.name,
-                call_id,
-                parent_call_id,
-                {
-                    "model": agent.model,
-                },
-            )
-
-            response = await self._router.call_llm(agent, context, tool_schemas)
-
-            self._record(
-                "llm_response",
-                agent.name,
-                call_id,
-                parent_call_id,
-                {
-                    "has_tool_calls": bool(response.tool_calls),
-                    "content_length": len(response.content) if response.content else 0,
-                },
-            )
-
-            if not response.tool_calls:
-                logger.warning(
-                    "[%s] Agent responded with text instead of finish(), nudging",
-                    agent.name,
-                )
-                context.add_assistant_text(response.content or "")
-                context.add_user(_FINISH_NUDGE)
-                continue
-
-            finish_call = _find_finish(response.tool_calls)
-            if finish_call is not None:
-                result = finish_call.arguments.get("message", "")
                 self._record(
-                    "finish",
+                    "llm_call",
                     agent.name,
                     call_id,
                     parent_call_id,
                     {
-                        "result": _truncate(result),
+                        "model": agent.model,
                     },
                 )
-                registry.unregister(loop_id)
-                return result
 
-            context.add_assistant_tool_calls(response.tool_calls, response.content)
+                response = await self._router.call_llm(agent, context, tool_schemas)
 
-            tasks = [
-                self._execute_tool_call(tc, agent.name, call_id)
-                for tc in response.tool_calls
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+                self._record(
+                    "llm_response",
+                    agent.name,
+                    call_id,
+                    parent_call_id,
+                    {
+                        "has_tool_calls": bool(response.tool_calls),
+                        "content_length": len(response.content)
+                        if response.content
+                        else 0,
+                    },
+                )
 
-            for tc, result in zip(response.tool_calls, results):
-                if isinstance(result, BaseException):
-                    context.add_tool_result(tc.id, tc.name, f"Error: {result}")
-                elif isinstance(result, ToolResult):
-                    context.add_tool_result(
-                        tc.id,
-                        tc.name,
-                        result.content,
-                        attachments=result.attachments,
+                if not response.tool_calls:
+                    logger.warning(
+                        "[%s] Agent responded with text instead of finish(), nudging",
+                        agent.name,
                     )
-                else:
-                    context.add_tool_result(tc.id, tc.name, result)
+                    context.add_assistant_text(response.content or "")
+                    context.add_user(_FINISH_NUDGE)
+                    continue
+
+                finish_call = _find_finish(response.tool_calls)
+                if finish_call is not None:
+                    result = finish_call.arguments.get("message", "")
+                    self._record(
+                        "finish",
+                        agent.name,
+                        call_id,
+                        parent_call_id,
+                        {
+                            "result": _truncate(result),
+                        },
+                    )
+                    return result
+
+                context.add_assistant_tool_calls(response.tool_calls, response.content)
+
+                tasks = [
+                    self._execute_tool_call(tc, agent.name, call_id)
+                    for tc in response.tool_calls
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                for tc, result in zip(response.tool_calls, results):
+                    if isinstance(result, BaseException):
+                        context.add_tool_result(tc.id, tc.name, f"Error: {result}")
+                    elif isinstance(result, ToolResult):
+                        context.add_tool_result(
+                            tc.id,
+                            tc.name,
+                            result.content,
+                            attachments=result.attachments,
+                        )
+                    else:
+                        context.add_tool_result(tc.id, tc.name, result)
+        finally:
+            registry.unregister(loop_id)
 
     def _resolve_agent_target(self, agent_name: str) -> Agent:
         if agent_name in self._router.tool_names:
