@@ -292,7 +292,6 @@ class Router:
 **도구 스키마 자동 생성:**
 - 사용자 정의 도구 스키마 전체
 - `call_agent` 도구 (agent_name, message, background 파라미터)
-- `spawn_background_agent` 도구 (agent_name, message, history 파라미터) → task_id 반환
 - `send_message` 도구 (task_id, message 파라미터) → 전송 확인 반환
 - `get_messages` 도구 (task_id, clear 파라미터) → status + messages 반환
 - `finish` 도구 (message 파라미터)
@@ -347,6 +346,40 @@ bg_loop.get_messages(clear=False)      # Get all messages
 3. `bg_loop.start()` runs the agent loop asynchronously while the caller continues immediately with `task_id`.
 4. Other agents can send messages to the running task via `send_message(task_id, message)`; messages are buffered in per-task `MessageQueue`.
 5. Callers poll `get_messages(task_id, clear=...)` for status/message snapshots and can await final output via `BackgroundAgentLoop.get_result()`.
+
+**Public API for background execution:**
+```python
+# Spawn a background agent (async)
+task_id = await run_background(
+    entry=agent,
+    message="...",
+    agents=[...],
+    tools=[...],
+    providers=[...],
+)
+
+# Spawn a background agent (sync)
+task_id = run_background_sync(
+    entry=agent,
+    message="...",
+    agents=[...],
+    tools=[...],
+    providers=[...],
+)
+
+# Send message to a running agent
+send_message(task_id, "additional instructions")
+
+# Get status and messages from a running agent
+status = get_agent_status(task_id)
+
+# Stream events from a background agent
+async for event in get_stream_events(task_id):
+    if event["type"] == "token":
+        print(event["data"]["text"], end="", flush=True)
+    elif event["type"] == "finish":
+        print(f"\n--- Result: {event['data']['output']} ---")
+```
 
 ### `runtime.py` — Runtime
 

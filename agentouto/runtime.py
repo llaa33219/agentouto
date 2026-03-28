@@ -142,6 +142,14 @@ class Runtime:
         history: list[Message] | None = None,
         loop_id: str | None = None,
     ) -> str:
+        from agentouto.loop_manager import RegisteredAgentLoop
+
+        if loop_id is None:
+            loop_id = call_id
+        registry = AgentLoopRegistry.get_instance()
+        registered_loop = RegisteredAgentLoop(agent=agent, task_id=loop_id)
+        registry.register(loop_id, registered_loop)
+
         system_prompt = self._router.build_system_prompt(agent, caller=caller)
         context = Context(system_prompt)
 
@@ -154,19 +162,15 @@ class Runtime:
         tool_schemas = self._router.build_tool_schemas(agent.name)
 
         while True:
-            if loop_id:
-                registry = AgentLoopRegistry.get_instance()
-                bg_loop = registry.get_loop(loop_id)
-                if bg_loop:
-                    try:
-                        injected_msg = bg_loop.message_queue._queue.get_nowait()
-                        if injected_msg:
-                            context.add_user(
-                                injected_msg.content,
-                                attachments=injected_msg.attachments,
-                            )
-                    except asyncio.QueueEmpty:
-                        pass
+            try:
+                injected_msg = registered_loop.message_queue._queue.get_nowait()
+                if injected_msg:
+                    context.add_user(
+                        injected_msg.content,
+                        attachments=injected_msg.attachments,
+                    )
+            except asyncio.QueueEmpty:
+                pass
 
             await self._maybe_summarize(context, agent)
 
@@ -214,6 +218,7 @@ class Runtime:
                         "result": _truncate(result),
                     },
                 )
+                registry.unregister(loop_id)
                 return result
 
             context.add_assistant_tool_calls(response.tool_calls, response.content)
@@ -1031,3 +1036,77 @@ def get_background_agent_status(task_id: str) -> str:
             )
 
     return "\n".join(result_parts)
+
+
+async def run_background(
+    entry: Agent,
+    message: str,
+    agents: list[Agent],
+    tools: list[Tool],
+    providers: list[Provider],
+    *,
+    attachments: list[Attachment] | None = None,
+    history: list[Message] | None = None,
+) -> str:
+    router = Router(agents, tools, providers)
+    runtime = Runtime(router)
+    return await runtime._spawn_background_agent(
+        entry,
+        message,
+        uuid.uuid4().hex,
+        None,
+        "user",
+        history=history,
+    )
+
+
+def run_background_sync(
+    entry: Agent,
+    message: str,
+    agents: list[Agent],
+    tools: list[Tool],
+    providers: list[Provider],
+    *,
+    attachments: list[Attachment] | None = None,
+    history: list[Message] | None = None,
+) -> str:
+    return asyncio.run(
+        run_background(
+            entry,
+            message,
+            agents,
+            tools,
+            providers,
+            attachments=attachments,
+            history=history,
+        )
+    )
+
+
+async def get_stream_events(task_id: str):
+    from agentouto.loop_manager import AgentLoopRegistry
+
+    registry = AgentLoopRegistry.get_instance()
+    bg_loop = registry.get_loop(task_id)
+
+    if bg_loop is None:
+        from agentouto.exceptions import AgentError
+
+        raise AgentError("unknown", f"No agent found with task_id: {task_id}")
+
+    event_queue: asyncio.Queue[dict] = asyncio.Queue()
+    bg_loop.set_event_queue(event_queue)
+
+    while True:
+        try:
+            event = await asyncio.wait_for(event_queue.get(), timeout=30.0)
+            yield event
+            if event.get("type") == "finish":
+                break
+        except TimeoutError:
+            if bg_loop.get_status() in {"completed", "failed"}:
+                break
+
+
+send_message = send_message_to_background_agent
+get_agent_status = get_background_agent_status

@@ -19,7 +19,7 @@ class AgentLoopRegistry:
     _instance_lock: threading.Lock = threading.Lock()
 
     def __init__(self) -> None:
-        self._loops: dict[str, BackgroundAgentLoop] = {}
+        self._loops: dict[str, BackgroundAgentLoop | RegisteredAgentLoop] = {}
         self._lock: threading.RLock = threading.RLock()
 
     @classmethod
@@ -30,19 +30,23 @@ class AgentLoopRegistry:
                     cls._instance = cls()
         return cls._instance
 
-    def register(self, loop_id: str, bg_loop: BackgroundAgentLoop) -> None:
+    def register(
+        self, loop_id: str, loop: BackgroundAgentLoop | RegisteredAgentLoop
+    ) -> None:
         with self._lock:
-            self._loops[loop_id] = bg_loop
+            self._loops[loop_id] = loop
 
     def unregister(self, loop_id: str) -> None:
         with self._lock:
             _ = self._loops.pop(loop_id, None)
 
-    def get_loop(self, loop_id: str) -> BackgroundAgentLoop | None:
+    def get_loop(
+        self, loop_id: str
+    ) -> BackgroundAgentLoop | RegisteredAgentLoop | None:
         with self._lock:
             return self._loops.get(loop_id)
 
-    def get_all_loops(self) -> dict[str, BackgroundAgentLoop]:
+    def get_all_loops(self) -> dict[str, BackgroundAgentLoop | RegisteredAgentLoop]:
         with self._lock:
             return dict(self._loops)
 
@@ -103,6 +107,39 @@ class BackgroundResult:
     messages: list[Message] = field(default_factory=list)
 
 
+class RegisteredAgentLoop:
+    """Lightweight wrapper for a running agent loop that can receive messages.
+
+    Used for both normal agent loops and background agent loops to enable
+    send_message() targeting any running agent.
+    """
+
+    def __init__(self, agent: Agent, task_id: str) -> None:
+        self.agent = agent
+        self.task_id = task_id
+        self.status: LoopStatus = "running"
+        self.messages: list[Message] = []
+        self.message_queue: MessageQueue = MessageQueue()
+
+    async def inject_message(self, message: Message) -> None:
+        if self.status not in {"pending", "running"}:
+            raise AgentError(
+                self.agent.name,
+                f"Cannot inject message when status is '{self.status}'.",
+            )
+        self.messages.append(message)
+        await self.message_queue.enqueue(message)
+
+    def get_status(self) -> LoopStatus:
+        return self.status
+
+    def get_messages(self, clear: bool = False) -> list[Message]:
+        collected = list(self.messages)
+        if clear:
+            self.messages.clear()
+        return collected
+
+
 @dataclass
 class BackgroundAgentLoop:
     agent: Agent
@@ -121,6 +158,14 @@ class BackgroundAgentLoop:
     _done_event: asyncio.Event = field(
         default_factory=asyncio.Event, init=False, repr=False
     )
+    _event_queue: asyncio.Queue | None = field(default=None, init=False, repr=False)
+
+    def set_event_queue(self, queue: asyncio.Queue) -> None:
+        self._event_queue = queue
+
+    async def inject_event(self, event: dict) -> None:
+        if self._event_queue is not None:
+            await self._event_queue.put(event)
 
     def start(self) -> None:
         if self._runner_task is not None and not self._runner_task.done():
@@ -208,4 +253,5 @@ __all__ = [
     "BackgroundAgentLoop",
     "BackgroundResult",
     "MessageQueue",
+    "RegisteredAgentLoop",
 ]

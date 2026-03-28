@@ -297,16 +297,29 @@ A(call_agent B) → B(call_agent A) → A(call_agent A) → A(finish) → A(fini
 
 ### 백그라운드 에이전트 스폰
 
-`call_agent`에 `background=True`를 사용하거나 `spawn_background_agent` 도구를 사용:
+`call_agent`에 `background=True`를 사용하거나 `run_background()`公开 API를 사용:
 
-```
+```python
+from agentouto import run_background
+
+# 공개 API로 백그라운드 스폰
+task_id = run_background(
+    entry=writer,
+    message="Write a report on AI trends.",
+    agents=[writer, researcher],
+    tools=[search_web],
+    providers=[openai],
+)
+# task_id = "bg_abc123"
+
+# 에이전트 내부에서 call_agent 사용
 call_agent(agent_name="writer", message="...", background=True)
 → "Background agent started. Task ID: bg_abc123"
 ```
 
 ### 메시지 보내기 — send_message
 
-백그라운드 에이전트가 실행 중일 때 메시지 주입:
+실행 중인 에이전트에 메시지 주입:
 
 ```
 send_message(task_id="bg_abc123", message="追加の指示")
@@ -315,18 +328,32 @@ send_message(task_id="bg_abc123", message="追加の指示")
 
 에이전트는 받은 메시지를 사용자 입력으로 수신한다.
 
-### 결과 조회 — get_messages
+### 결과 조회 — get_agent_status
 
-백그라운드 에이전트의 상태와 메시지 조회:
+실행 중인 에이전트의 상태와 메시지 조회:
 
 ```
-get_messages(task_id="bg_abc123", clear=False)
+get_agent_status(task_id="bg_abc123")
 → "Task ID: bg_abc123
    Agent: writer
    Status: running
    Messages (3):
      [forward] user -> writer: ...
      [return] writer -> user: ..."
+```
+
+### 스트리밍 — get_stream_events
+
+백그라운드 에이전트에서 스트리밍 events 수신:
+
+```python
+from agentouto import get_stream_events
+
+async for event in get_stream_events("bg_abc123"):
+    if event["type"] == "token":
+        print(event["data"]["text"], end="", flush=True)
+    elif event["type"] == "finish":
+        print(f"\n--- Result: {event['data']['output']} ---")
 ```
 
 ### 격리된 루프 간 통신 다이어그램

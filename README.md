@@ -474,33 +474,40 @@ for msg in result.messages:
 
 ### Background Execution — Isolated Agent Loops
 
-Agents can run in **isolated background loops** that can receive messages while running. This enables true concurrent agents that can communicate during execution.
+Agents can run in **isolated loops** that can receive messages while running. This enables true concurrent agents that can communicate during execution.
 
 #### Spawning Background Agents
 
-Use `call_agent` with `background=True`, or use `spawn_background_agent` directly:
+Use `call_agent` with `background=True`, or use `run_background()` directly:
 
 ```python
-# Spawn an agent in background — returns immediately with task_id
-call_agent(
-    agent_name="writer",
-    message="Write a report on AI trends.",
-    background=True,
-)
-# Returns: "Background agent started. Task ID: bg_abc123"
+from agentouto import run_background
 
-# Or use spawn_background_agent directly
-spawn_background_agent(
+# Spawn an agent in background — returns immediately with task_id
+task_id = run_background(
+    entry=researcher,
+    message="Research AI trends",
+    agents=[researcher, writer],
+    tools=[search_web],
+    providers=[openai],
+)
+# task_id = "bg_abc123"
+
+# Or use call_agent with background=True from within an agent
+call_agent(
     agent_name="researcher",
     message="Research the latest in AI.",
+    background=True,
 )
 ```
 
 #### Sending Messages to Running Agents
 
-Use `send_message` to inject messages into a running background agent:
+Use `send_message` to inject messages into a running agent:
 
 ```python
+from agentouto import send_message
+
 # Send a message to the running agent
 send_message(
     task_id="bg_abc123",
@@ -513,11 +520,13 @@ The agent receives the message as a new user input in its running loop.
 
 #### Getting Status and Messages
 
-Use `get_messages` to check on a background agent:
+Use `get_agent_status` to check on a running agent:
 
 ```python
+from agentouto import get_agent_status
+
 # Retrieve status, result, and all messages
-get_messages(task_id="bg_abc123", clear=False)
+status = get_agent_status("bg_abc123")
 # Returns:
 # Task ID: bg_abc123
 # Agent: writer
@@ -527,10 +536,24 @@ get_messages(task_id="bg_abc123", clear=False)
 #   [return] writer -> user: Here's the report...
 ```
 
+#### Streaming Events from Background Agents
+
+Use `get_stream_events` to stream events from a background agent:
+
+```python
+from agentouto import get_stream_events
+
+async for event in get_stream_events("bg_abc123"):
+    if event["type"] == "token":
+        print(event["data"]["text"], end="", flush=True)
+    elif event["type"] == "finish":
+        print(f"\n--- Result: {event['data']['output']} ---")
+```
+
 #### Background vs Parallel Calls
 
-| Aspect | `asyncio.gather` Parallel | Background Loops |
-|--------|---------------------------|------------------|
+| Aspect | `asyncio.gather` Parallel | Isolated Loops |
+|--------|---------------------------|----------------|
 | Execution | Same loop iteration | Isolated loops |
 | Communication | Results only after completion | Real-time messages |
 | Independence | Share context | Own context |
@@ -539,18 +562,25 @@ get_messages(task_id="bg_abc123", clear=False)
 #### Example: Concurrent Research and Writing
 
 ```python
-# Agent A spawns Agent B in background, continues working,
-# then sends additional instructions to B
+from agentouto import run_background, send_message, get_agent_status
 
-# Agent A's actions:
-# 1. call_agent(agent_name="researcher", message="Research AI", background=True)
-#    → Returns "Task ID: bg_res_001"
-#
-# 2. Do other work in parallel...
-#
-# 3. send_message(task_id="bg_res_001", message="Also look at GPT-5")
-#
-# 4. get_messages(task_id="bg_res_001")
+# Spawn researcher in background
+task_id = run_background(
+    entry=researcher,
+    message="Research AI trends",
+    agents=[researcher, writer],
+    tools=[search_web],
+    providers=[openai],
+)
+# task_id = "bg_res_001"
+
+# Do other work...
+
+# Send additional instructions
+send_message(task_id="bg_res_001", message="Also look at GPT-5")
+
+# Check status
+print(get_agent_status("bg_res_001"))
 ```
 
 See [`ai-docs/MESSAGE_PROTOCOL.md`](./ai-docs/MESSAGE_PROTOCOL.md#11-백그라운드-실행--background-execution) for detailed protocol documentation.
@@ -708,6 +738,7 @@ agentouto/
 | **15** | OAuth authentication (OpenAI, Claude, Google) | ✅ Done |
 | **16** | Conversation history (`history` parameter) | ✅ Done |
 | **17** | Background execution + inter-agent messaging | ✅ Done |
+| **18** | Background streaming + unified API (send_message, get_agent_status, run_background) | ✅ Done |
 
 ---
 
