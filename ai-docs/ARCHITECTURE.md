@@ -56,6 +56,16 @@ agentouto/
 | `run()` | function | 동기 실행 진입점 |
 | `async_run()` | async function | 비동기 실행 진입점 |
 | `async_run_stream()` | async generator | 스트리밍 실행 진입점 (StreamEvent 생성) |
+| `run_background()` | async function | 백그라운드 에이전트 스폰 (async) |
+| `run_background_sync()` | function | 백그라운드 에이전트 스폰 (sync) |
+| `send_message()` | function | 실행 중인 에이전트에 메시지 주입 |
+| `get_agent_status()` | function | 에이전트 상태/메시지 조회 |
+| `get_stream_events()` | async generator | 백그라운드 에이전트 스트리밍 이벤트 |
+| `AgentLoopRegistry` | class | 스레드 세이프 싱글톤, 모든 루프 추적 |
+| `BackgroundAgentLoop` | class | 백그라운드 에이전트 실행 래퍼 |
+| `BackgroundResult` | dataclass | 백그라운드 태스크 결과 컨테이너 |
+| `RegisteredAgentLoop` | class | 일반/백그라운드 공용 루프 래퍼 |
+| `MessageQueue` | class | 에이전트 간 비동기 메시지 큐 |
 | `EventLog` | class | 구조화된 이벤트 로그 컨테이너 |
 | `AgentEvent` | dataclass | 개별 이벤트 레코드 |
 | `Trace` | class | 호출 트리 빌더 |
@@ -307,6 +317,7 @@ class AgentLoopRegistry:      # Thread-safe singleton for tracking all backgroun
 class MessageQueue:           # Per-agent async message queue (max 100 messages)
 class BackgroundAgentLoop:    # Wrapper for background agent execution
 class BackgroundResult:       # Dataclass for background task results
+class RegisteredAgentLoop:    # Lightweight wrapper for any running agent loop (normal or background)
 ```
 
 **AgentLoopRegistry** — Global singleton that tracks all running background agent loops:
@@ -720,6 +731,14 @@ OAuth 기능 설치: `pip install agentouto[oauth]`
 
 `call_agent`는 `_run_agent_loop`을 재귀적으로 호출한다. 각 호출은 독립적인 Context를 가진다. 호출 스택이 곧 에이전트 호출 체인이다.
 
+### 패턴 3: 프로바이더 추상화
+
+`ProviderBackend` ABC → 각 kind별 구현체. `get_backend(kind)` 팩토리가 lazy import로 인스턴스를 생성한다. Router가 kind별로 캐싱한다.
+
+### 패턴 4: 에러 → 도구 결과
+
+`asyncio.gather(return_exceptions=True)`로 에러를 도구 결과에 포함시켜 LLM에게 전달한다. 런타임이 크래시하지 않고 LLM이 에러를 보고 판단한다.
+
 ### 패턴 5: 토큰 로테이션 캐싱
 
 OAuth 토큰이 갱신될 수 있으므로, 프로바이더 백엔드는 `(api_key, client)` 튜플로 클라이언트를 캐싱한다:
@@ -739,11 +758,5 @@ class OpenAIBackend:
 ```
 
 `call()`/`stream()`에서 `api_key = await provider.resolve_api_key()`를 호출한 후 `_get_client(provider, api_key)`로 전달한다. 토큰이 변경되면 클라이언트를 새로 생성한다.
-
-### 패턴 3: 프로바이더 추상화
-
-`ProviderBackend` ABC → 각 kind별 구현체. `get_backend(kind)` 팩토리가 lazy import로 인스턴스를 생성한다. Router가 kind별로 캐싱한다.
-
-### 패턴 4: 에러 → 도구 결과
 
 `asyncio.gather(return_exceptions=True)`로 에러를 도구 결과에 포함시켜 LLM에게 전달한다. 런타임이 크래시하지 않고 LLM이 에러를 보고 판단한다.

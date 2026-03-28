@@ -8,9 +8,9 @@
 
 ## 1. 현재 상태
 
-**버전:** 0.18.0 (공개)
+**버전:** 0.20.4 (공개)
 
-**최종 업데이트:** 시스템 프롬프트 강화 — 호출자 정보, 병렬 실행 가이드, 협업 가이드라인 추가
+**최종 업데이트:** 백그라운드 실행 및 인터-에이전트 메시징 완료 — AgentLoopRegistry, RegisteredAgentLoop, send_message, get_agent_status, run_background
 
 ---
 
@@ -185,6 +185,41 @@
 - [x] ai-docs 전체 업데이트 (ARCHITECTURE, PROVIDER_BACKENDS, ROADMAP)
 - [x] README 업데이트 (Supported Providers 테이블, Provider 섹션)
 
+### Phase 16: 대화 이력 (history) ✅
+
+- [x] `run()`, `async_run()`, `async_run_stream()`에 `history` 파라미터 추가
+- [x] `call_agent` 도구에 `history` 파라미터 추가 (LLM이 이전 대화 전달 가능)
+- [x] `Message` 목록을 에이전트 컨텍스트 앞에 추가하여 이전 대화 참조 가능
+- [x] 공개 API 엑스포트: `history` 파라미터
+- [x] 186개 테스트 통과
+- [x] README 업데이트
+
+### Phase 17: 백그라운드 실행 ✅
+
+- [x] `loop_manager.py` 신규 생성: `AgentLoopRegistry`, `MessageQueue`, `BackgroundAgentLoop`, `RegisteredAgentLoop`
+- [x] `AgentLoopRegistry` — 스레드 세이프 싱글톤, 모든 실행 중 에이전트 루프 추적
+- [x] `BackgroundAgentLoop` — 백그라운드 에이전트 실행 래퍼 (메시지 주입, 상태 관리)
+- [x] `RegisteredAgentLoop` — 일반/백그라운드 에이전트 공용 루프 래퍼
+- [x] `_run_agent_loop` — 모든 루프를 AgentLoopRegistry에 등록 (시작 시 register, 종료 시 unregister)
+- [x] `_spawn_background_agent` — 백그라운드 에이전트 스폰 로직
+- [x] `call_agent(background=True)` — 백그라운드에서 에이전트 실행
+- [x] `send_message` 도구 — 실행 중인 에이전트에 메시지 주입
+- [x] `get_messages` 도구 — 에이전트 상태/메시지 조회
+- [x] 13개 신규 테스트 (test_background.py)
+- [x] ai-docs 업데이트 (ARCHITECTURE, MESSAGE_PROTOCOL, ROADMAP)
+- [x] README 업데이트
+
+### Phase 18: 백그라운드 스트리밍 + 통합 API ✅
+
+- [x] `run_background()` — async 백그라운드 스폰 API
+- [x] `run_background_sync()` — sync 백그라운드 스폰 API
+- [x] `send_message()` — 공개 API (send_message_to_background_agent 별칭)
+- [x] `get_agent_status()` — 공개 API (get_background_agent_status 별칭)
+- [x] `get_stream_events()` — 백그라운드 에이전트에서 스트리밍 이벤트 수신
+- [x] `_run_agent_loop` try/finally로 모든 종료 경로에서 unregister 보장
+- [x] 186개 테스트 통과
+- [x] ai-docs 업데이트 (ARCHITECTURE, MESSAGE_PROTOCOL, ROADMAP)
+
 ---
 
 ## 3. 미구현 기능
@@ -212,6 +247,17 @@
 ---
 
 ## 5. 변경 이력
+
+### 0.20.4 (백그라운드 실행 + 인터-에이전트 메시징)
+
+- Phase 17, 18 완료: 백그라운드 실행 및 인터-에이전트 메시징
+- `loop_manager.py` 신규: AgentLoopRegistry, MessageQueue, BackgroundAgentLoop, RegisteredAgentLoop
+- `_run_agent_loop` — 모든 루프를 AgentLoopRegistry에 등록/해제
+- `run_background()` / `run_background_sync()` — 백그라운드 에이전트 스폰
+- `send_message()` / `get_agent_status()` / `get_stream_events()` — 공개 API
+- `call_agent(background=True)` — 백그라운드 에이전트 내부 호출
+- try/finally로 모든 종료 경로에서 unregister 보장
+- 186개 테스트
 
 ### 0.18.0 (시스템 프롬프트 강화)
 
