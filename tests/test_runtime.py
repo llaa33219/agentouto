@@ -39,7 +39,9 @@ class MockBackend(ProviderBackend):
 def _finish(message: str) -> LLMResponse:
     return LLMResponse(
         content=None,
-        tool_calls=[ToolCall(id="fin_1", name="finish", arguments={"message": message})],
+        tool_calls=[
+            ToolCall(id="fin_1", name="finish", arguments={"message": message})
+        ],
     )
 
 
@@ -69,8 +71,7 @@ def _call_agent(agent_name: str, message: str) -> LLMResponse:
 
 def _multi_tool_calls(*calls: tuple[str, str, dict[str, str]]) -> LLMResponse:
     tool_calls = [
-        ToolCall(id=tc_id, name=name, arguments=args)
-        for name, tc_id, args in calls
+        ToolCall(id=tc_id, name=name, arguments=args) for name, tc_id, args in calls
     ]
     return LLMResponse(content=None, tool_calls=tool_calls)
 
@@ -85,12 +86,16 @@ def provider() -> Provider:
 
 @pytest.fixture
 def agent_a() -> Agent:
-    return Agent(name="agent_a", instructions="Agent A.", model="gpt-4o", provider="openai")
+    return Agent(
+        name="agent_a", instructions="Agent A.", model="gpt-4o", provider="openai"
+    )
 
 
 @pytest.fixture
 def agent_b() -> Agent:
-    return Agent(name="agent_b", instructions="Agent B.", model="gpt-4o", provider="openai")
+    return Agent(
+        name="agent_b", instructions="Agent B.", model="gpt-4o", provider="openai"
+    )
 
 
 @pytest.fixture
@@ -99,6 +104,7 @@ def search_tool() -> Tool:
     def search(query: str) -> str:
         """Search the web."""
         return f"Results for: {query}"
+
     return search
 
 
@@ -108,6 +114,7 @@ def upper_tool() -> Tool:
     def uppercase(text: str) -> str:
         """Convert to uppercase."""
         return text.upper()
+
     return uppercase
 
 
@@ -117,13 +124,18 @@ def upper_tool() -> Tool:
 class TestSingleAgentTextResponse:
     @pytest.mark.asyncio
     async def test_text_response_triggers_nudge_then_finish(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         """Text-only response nudges the LLM; finish on retry is accepted."""
-        mock = MockBackend([
-            _text("Hello from LLM"),
-            _finish("Hello from LLM"),
-        ])
+        mock = MockBackend(
+            [
+                _text("Hello from LLM"),
+                _finish("Hello from LLM"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 entry=agent_a,
@@ -139,7 +151,10 @@ class TestSingleAgentTextResponse:
 class TestSingleAgentFinish:
     @pytest.mark.asyncio
     async def test_llm_calls_finish(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         mock = MockBackend([_finish("Final answer")])
         with patch("agentouto.router.get_backend", return_value=mock):
@@ -156,12 +171,17 @@ class TestSingleAgentFinish:
 class TestSingleAgentToolCall:
     @pytest.mark.asyncio
     async def test_tool_call_then_finish(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
-        mock = MockBackend([
-            _tool_call("search", "tc1", query="AI trends"),
-            _finish("Based on search: AI is trending"),
-        ])
+        mock = MockBackend(
+            [
+                _tool_call("search", "tc1", query="AI trends"),
+                _finish("Based on search: AI is trending"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 entry=agent_a,
@@ -183,11 +203,13 @@ class TestMultiAgent:
         provider: Provider,
         search_tool: Tool,
     ) -> None:
-        mock = MockBackend([
-            _call_agent("agent_b", "Please help me"),
-            _finish("I helped you"),
-            _finish("Done with help from B"),
-        ])
+        mock = MockBackend(
+            [
+                _call_agent("agent_b", "Please help me"),
+                _finish("I helped you"),
+                _finish("Done with help from B"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 entry=agent_a,
@@ -203,7 +225,10 @@ class TestMultiAgent:
 class TestDebugMode:
     @pytest.mark.asyncio
     async def test_debug_populates_messages(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         mock = MockBackend([_finish("debug result")])
         with patch("agentouto.router.get_backend", return_value=mock):
@@ -228,7 +253,10 @@ class TestDebugMode:
 
     @pytest.mark.asyncio
     async def test_debug_populates_event_log(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         mock = MockBackend([_finish("result")])
         with patch("agentouto.router.get_backend", return_value=mock):
@@ -248,7 +276,10 @@ class TestDebugMode:
 
     @pytest.mark.asyncio
     async def test_debug_populates_trace(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         mock = MockBackend([_finish("traced")])
         with patch("agentouto.router.get_backend", return_value=mock):
@@ -266,7 +297,10 @@ class TestDebugMode:
 
     @pytest.mark.asyncio
     async def test_format_trace(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         mock = MockBackend([_finish("traced")])
         with patch("agentouto.router.get_backend", return_value=mock):
@@ -283,7 +317,10 @@ class TestDebugMode:
 
     @pytest.mark.asyncio
     async def test_format_trace_without_debug(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         mock = MockBackend([_finish("no debug")])
         with patch("agentouto.router.get_backend", return_value=mock):
@@ -306,11 +343,13 @@ class TestDebugMultiAgent:
         provider: Provider,
         search_tool: Tool,
     ) -> None:
-        mock = MockBackend([
-            _call_agent("agent_b", "Help"),
-            _finish("Helped"),
-            _finish("All done"),
-        ])
+        mock = MockBackend(
+            [
+                _call_agent("agent_b", "Help"),
+                _finish("Helped"),
+                _finish("All done"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 entry=agent_a,
@@ -337,13 +376,15 @@ class TestParallelToolCalls:
         search_tool: Tool,
         upper_tool: Tool,
     ) -> None:
-        mock = MockBackend([
-            _multi_tool_calls(
-                ("search", "tc1", {"query": "hello"}),
-                ("uppercase", "tc2", {"text": "world"}),
-            ),
-            _finish("Got both results"),
-        ])
+        mock = MockBackend(
+            [
+                _multi_tool_calls(
+                    ("search", "tc1", {"query": "hello"}),
+                    ("uppercase", "tc2", {"text": "world"}),
+                ),
+                _finish("Got both results"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 entry=agent_a,
@@ -359,7 +400,10 @@ class TestParallelToolCalls:
 class TestAttachmentsPassthrough:
     @pytest.mark.asyncio
     async def test_attachments_passed_to_context(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         mock = MockBackend([_finish("analyzed")])
         att = Attachment(mime_type="image/png", data="base64data")
@@ -381,7 +425,9 @@ class TestAttachmentsPassthrough:
 
     @pytest.mark.asyncio
     async def test_tool_result_with_attachments(
-        self, agent_a: Agent, provider: Provider,
+        self,
+        agent_a: Agent,
+        provider: Provider,
     ) -> None:
         @Tool
         def fetch_image(url: str) -> ToolResult:
@@ -391,10 +437,12 @@ class TestAttachmentsPassthrough:
                 attachments=[Attachment(mime_type="image/png", data="imgdata")],
             )
 
-        mock = MockBackend([
-            _tool_call("fetch_image", "tc1", url="https://example.com/img.png"),
-            _finish("Image shows a cat"),
-        ])
+        mock = MockBackend(
+            [
+                _tool_call("fetch_image", "tc1", url="https://example.com/img.png"),
+                _finish("Image shows a cat"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 entry=agent_a,
@@ -408,7 +456,10 @@ class TestAttachmentsPassthrough:
 
     @pytest.mark.asyncio
     async def test_no_attachments_backward_compat(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         mock = MockBackend([_finish("result")])
         with patch("agentouto.router.get_backend", return_value=mock):
@@ -427,15 +478,20 @@ class TestAttachmentsPassthrough:
 class TestFinishNudge:
     @pytest.mark.asyncio
     async def test_multiple_nudges_until_finish(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         """Agent is nudged repeatedly until it uses finish()."""
-        mock = MockBackend([
-            _text("thinking..."),
-            _text("still thinking..."),
-            _text("almost done..."),
-            _finish("done"),
-        ])
+        mock = MockBackend(
+            [
+                _text("thinking..."),
+                _text("still thinking..."),
+                _text("almost done..."),
+                _finish("done"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 entry=agent_a,
@@ -449,7 +505,10 @@ class TestFinishNudge:
 
     @pytest.mark.asyncio
     async def test_nudge_message_added_to_context(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         """Nudge adds assistant text + user nudge message to context."""
         from agentouto.runtime import _FINISH_NUDGE
@@ -494,15 +553,20 @@ class TestFinishNudge:
 class TestFinishNudgeStreaming:
     @pytest.mark.asyncio
     async def test_stream_text_response_triggers_nudge_then_finish(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         """Streaming: text-only response nudges, finish on retry is accepted."""
         from agentouto.streaming import StreamEvent, async_run_stream
 
-        mock = MockBackend([
-            _text("intermediate"),
-            _finish("final result"),
-        ])
+        mock = MockBackend(
+            [
+                _text("intermediate"),
+                _finish("final result"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             events: list[StreamEvent] = []
             async for event in async_run_stream(
@@ -522,7 +586,10 @@ class TestFinishNudgeStreaming:
 class TestMessagesAlwaysPopulated:
     @pytest.mark.asyncio
     async def test_messages_without_debug(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         mock = MockBackend([_finish("result")])
         with patch("agentouto.router.get_backend", return_value=mock):
@@ -543,12 +610,17 @@ class TestToolCallErrorHandling:
 
     @pytest.mark.asyncio
     async def test_unknown_tool_error_no_crash(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
-        mock = MockBackend([
-            _tool_call("nonexistent", "tc1"),
-            _finish("ok"),
-        ])
+        mock = MockBackend(
+            [
+                _tool_call("nonexistent", "tc1"),
+                _finish("ok"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 entry=agent_a,
@@ -575,8 +647,11 @@ class TestToolCallErrorHandling:
                 self._call_count = 0
 
             async def call(
-                self, context: Context, tools: list[dict[str, Any]],
-                agent: Agent, provider: Provider,
+                self,
+                context: Context,
+                tools: list[dict[str, Any]],
+                agent: Agent,
+                provider: Provider,
             ) -> LLMResponse:
                 self._call_count += 1
                 if self._call_count == 1:
@@ -613,8 +688,11 @@ class TestToolCallErrorHandling:
                 self._call_count = 0
 
             async def call(
-                self, context: Context, tools: list[dict[str, Any]],
-                agent: Agent, provider: Provider,
+                self,
+                context: Context,
+                tools: list[dict[str, Any]],
+                agent: Agent,
+                provider: Provider,
             ) -> LLMResponse:
                 self._call_count += 1
                 if self._call_count == 1:
@@ -650,8 +728,11 @@ class TestToolCallErrorHandling:
                 self._call_count = 0
 
             async def call(
-                self, context: Context, tools: list[dict[str, Any]],
-                agent: Agent, provider: Provider,
+                self,
+                context: Context,
+                tools: list[dict[str, Any]],
+                agent: Agent,
+                provider: Provider,
             ) -> LLMResponse:
                 self._call_count += 1
                 if self._call_count == 1:
@@ -688,8 +769,11 @@ class TestToolCallErrorHandling:
                 self._call_count = 0
 
             async def call(
-                self, context: Context, tools: list[dict[str, Any]],
-                agent: Agent, provider: Provider,
+                self,
+                context: Context,
+                tools: list[dict[str, Any]],
+                agent: Agent,
+                provider: Provider,
             ) -> LLMResponse:
                 self._call_count += 1
                 if self._call_count == 1:
@@ -717,14 +801,19 @@ class TestStreamingErrorHandling:
 
     @pytest.mark.asyncio
     async def test_stream_unknown_tool_no_crash(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         from agentouto.streaming import StreamEvent, async_run_stream
 
-        mock = MockBackend([
-            _tool_call("nonexistent", "tc1"),
-            _finish("ok"),
-        ])
+        mock = MockBackend(
+            [
+                _tool_call("nonexistent", "tc1"),
+                _finish("ok"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             events: list[StreamEvent] = []
             async for event in async_run_stream(
@@ -749,10 +838,12 @@ class TestStreamingErrorHandling:
     ) -> None:
         from agentouto.streaming import StreamEvent, async_run_stream
 
-        mock = MockBackend([
-            _tool_call("agent_b", "tc1"),
-            _finish("ok"),
-        ])
+        mock = MockBackend(
+            [
+                _tool_call("agent_b", "tc1"),
+                _finish("ok"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             events: list[StreamEvent] = []
             async for event in async_run_stream(
@@ -769,14 +860,19 @@ class TestStreamingErrorHandling:
 
     @pytest.mark.asyncio
     async def test_stream_tool_as_agent_no_crash(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         from agentouto.streaming import StreamEvent, async_run_stream
 
-        mock = MockBackend([
-            _call_agent("search", "find something"),
-            _finish("ok"),
-        ])
+        mock = MockBackend(
+            [
+                _call_agent("search", "find something"),
+                _finish("ok"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             events: list[StreamEvent] = []
             async for event in async_run_stream(
@@ -793,14 +889,19 @@ class TestStreamingErrorHandling:
 
     @pytest.mark.asyncio
     async def test_stream_unknown_agent_no_crash(
-        self, agent_a: Agent, provider: Provider, search_tool: Tool,
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
     ) -> None:
         from agentouto.streaming import StreamEvent, async_run_stream
 
-        mock = MockBackend([
-            _call_agent("nobody", "hi"),
-            _finish("ok"),
-        ])
+        mock = MockBackend(
+            [
+                _call_agent("nobody", "hi"),
+                _finish("ok"),
+            ]
+        )
         with patch("agentouto.router.get_backend", return_value=mock):
             events: list[StreamEvent] = []
             async for event in async_run_stream(

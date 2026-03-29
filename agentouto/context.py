@@ -42,13 +42,19 @@ class Context:
     def messages(self) -> list[ContextMessage]:
         return list(self._messages)
 
-    def add_user(self, content: str, attachments: list[Attachment] | None = None) -> None:
-        self._messages.append(ContextMessage(role="user", content=content, attachments=attachments))
+    def add_user(
+        self, content: str, attachments: list[Attachment] | None = None
+    ) -> None:
+        self._messages.append(
+            ContextMessage(role="user", content=content, attachments=attachments)
+        )
 
     def add_assistant_text(self, content: str) -> None:
         self._messages.append(ContextMessage(role="assistant", content=content))
 
-    def add_assistant_tool_calls(self, tool_calls: list[ToolCall], content: str | None = None) -> None:
+    def add_assistant_tool_calls(
+        self, tool_calls: list[ToolCall], content: str | None = None
+    ) -> None:
         self._messages.append(
             ContextMessage(role="assistant", content=content, tool_calls=tool_calls)
         )
@@ -71,9 +77,7 @@ class Context:
         )
 
     def replace_with_summary(self, summary: str, keep_from: int) -> None:
-        summary_text = (
-            f"[Previous conversation summary]\n{summary}\n[End of summary]"
-        )
+        summary_text = f"[Previous conversation summary]\n{summary}\n[End of summary]"
         kept = self._messages[keep_from:]
         if kept and kept[0].role == "user":
             kept[0] = ContextMessage(
@@ -83,6 +87,4 @@ class Context:
             )
             self._messages = kept
         else:
-            self._messages = [
-                ContextMessage(role="user", content=summary_text)
-            ] + kept
+            self._messages = [ContextMessage(role="user", content=summary_text)] + kept

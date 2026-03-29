@@ -32,9 +32,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger("agentouto")
 
 _FINISH_NUDGE = (
-    "Your plain text response was NOT delivered to the caller. "
+    "[SYSTEM] Your plain text response was NOT delivered to the caller. "
     "You MUST use the finish tool to return results. "
-    'Call finish(message="your result") now.'
+    'Call finish(message="your result") now. This is a SYSTEM message, not from a user.'
 )
 
 
