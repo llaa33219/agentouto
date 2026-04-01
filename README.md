@@ -734,7 +734,7 @@ agentouto/
 | **8** | Rich parameter schemas (Annotated, Literal, Enum, default) | ✅ Done |
 | **9** | Reasoning tag handling (content preservation, detection prevention) | ✅ Done |
 | **10** | Auto max output tokens + safe JSON argument parsing | ✅ Done |
-| **13** | OpenAI Responses API backend (`openai_responses`) | ✅ Done |
+| **13** | OpenAI Responses API backend (`openai_responses`) + tool-result attachment routing | ✅ Done |
 | **15** | OAuth authentication (OpenAI, Claude, Google) | ✅ Done |
 | **16** | Conversation history (`history` parameter) | ✅ Done |
 | **17** | Background execution + inter-agent messaging | ✅ Done |

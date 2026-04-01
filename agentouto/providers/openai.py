@@ -47,7 +47,9 @@ class OpenAIBackend(ProviderBackend):
             "messages": messages,
             **agent.extra,
         }
-        max_tokens = await resolve_max_output_tokens(agent.model, agent.max_output_tokens)
+        max_tokens = await resolve_max_output_tokens(
+            agent.model, agent.max_output_tokens
+        )
         if max_tokens is not None:
             params["max_completion_tokens"] = max_tokens
         if openai_tools:
@@ -99,7 +101,9 @@ class OpenAIBackend(ProviderBackend):
             "stream": True,
             **agent.extra,
         }
-        max_tokens = await resolve_max_output_tokens(agent.model, agent.max_output_tokens)
+        max_tokens = await resolve_max_output_tokens(
+            agent.model, agent.max_output_tokens
+        )
         if max_tokens is not None:
             params["max_completion_tokens"] = max_tokens
         if openai_tools:
@@ -156,20 +160,31 @@ class OpenAIBackend(ProviderBackend):
                 )
             )
 
-        yield LLMResponse(
-            content=accumulated_content or None, tool_calls=parsed_calls
-        )
+        yield LLMResponse(content=accumulated_content or None, tool_calls=parsed_calls)
 
 
 def _build_attachment_parts(attachments: list[Attachment]) -> list[dict[str, Any]]:
     parts: list[dict[str, Any]] = []
     for att in attachments:
         if att.mime_type.startswith("image/"):
-            url = att.url or f"data:{att.mime_type};base64,{att.data}"
-            parts.append({"type": "image_url", "image_url": {"url": url}})
+            if att.url:
+                parts.append({"type": "image_url", "image_url": {"url": att.url}})
+            elif att.data:
+                parts.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{att.mime_type};base64,{att.data}"},
+                    }
+                )
         elif att.mime_type.startswith("audio/"):
-            fmt = att.mime_type.split("/")[-1]
-            parts.append({"type": "input_audio", "input_audio": {"data": att.data, "format": fmt}})
+            if att.data:
+                fmt = att.mime_type.split("/")[-1]
+                parts.append(
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": att.data, "format": fmt},
+                    }
+                )
     return parts
 
 
@@ -205,21 +220,23 @@ def _build_messages(context: Context) -> list[dict[str, Any]]:
             messages.append(entry)
         elif msg.role == "tool":
             if msg.attachments:
-                content_parts = [
-                    {"type": "text", "text": msg.content or ""}
-                ]
+                content_parts = [{"type": "text", "text": msg.content or ""}]
                 content_parts.extend(_build_attachment_parts(msg.attachments))
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": msg.tool_call_id,
-                    "content": content_parts,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": msg.tool_call_id,
+                        "content": content_parts,
+                    }
+                )
             else:
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": msg.tool_call_id,
-                    "content": msg.content or "",
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": msg.tool_call_id,
+                        "content": msg.content or "",
+                    }
+                )
 
     return messages
 
@@ -247,7 +264,7 @@ def _parse_tool_arguments(raw: str | None) -> dict[str, Any]:
     if text.startswith("```"):
         first_nl = text.find("\n")
         if first_nl != -1:
-            text = text[first_nl + 1:]
+            text = text[first_nl + 1 :]
         if text.endswith("```"):
             text = text[:-3]
         text = text.strip()
