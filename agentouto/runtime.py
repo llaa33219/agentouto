@@ -5,7 +5,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from agentouto._constants import CALL_AGENT, FINISH
 from agentouto.agent import Agent
@@ -52,11 +52,19 @@ class RunResult:
 
 
 class Runtime:
-    def __init__(self, router: Router, debug: bool = False) -> None:
+    def __init__(
+        self,
+        router: Router,
+        debug: bool = False,
+        extra_instructions: str | None = None,
+        extra_instructions_scope: Literal["entry", "all"] = "entry",
+    ) -> None:
         self._router = router
         self._debug = debug
         self._event_log: EventLog | None = EventLog() if debug else None
         self._messages: list[Message] = []
+        self._extra_instructions = extra_instructions
+        self._extra_instructions_scope = extra_instructions_scope
 
     async def execute(
         self,
@@ -96,6 +104,7 @@ class Runtime:
             "user",
             attachments=attachments,
             history=history,
+            extra_instructions=self._extra_instructions,
         )
 
         self._messages.append(
@@ -141,6 +150,7 @@ class Runtime:
         attachments: list[Attachment] | None = None,
         history: list[Message] | None = None,
         loop_id: str | None = None,
+        extra_instructions: str | None = None,
     ) -> str:
         from agentouto.loop_manager import RegisteredAgentLoop
 
@@ -150,7 +160,9 @@ class Runtime:
         registered_loop = RegisteredAgentLoop(agent=agent, task_id=loop_id)
         registry.register(loop_id, registered_loop)
 
-        system_prompt = self._router.build_system_prompt(agent, caller=caller)
+        system_prompt = self._router.build_system_prompt(
+            agent, caller=caller, extra_instructions=extra_instructions
+        )
         context = Context(system_prompt)
 
         # Add history messages to context if provided
@@ -330,6 +342,9 @@ class Runtime:
                     caller_call_id,
                     caller_name,
                     history=history,
+                    extra_instructions=self._extra_instructions
+                    if self._extra_instructions_scope == "all"
+                    else None,
                 )
                 return f"Background agent started. Task ID: {task_id}"
 
@@ -340,6 +355,9 @@ class Runtime:
                 caller_call_id,
                 caller_name,
                 history=history,
+                extra_instructions=self._extra_instructions
+                if self._extra_instructions_scope == "all"
+                else None,
             )
 
             self._messages.append(
@@ -390,6 +408,9 @@ class Runtime:
                 caller_call_id,
                 caller_name,
                 history=history,
+                extra_instructions=self._extra_instructions
+                if self._extra_instructions_scope == "all"
+                else None,
             )
             return f"Background agent started. Task ID: {task_id}"
 
@@ -507,6 +528,7 @@ class Runtime:
         parent_call_id: str | None,
         caller: str | None = None,
         history: list[Message] | None = None,
+        extra_instructions: str | None = None,
     ) -> str:
         task_id = f"bg_{uuid.uuid4().hex[:12]}"
 
@@ -519,6 +541,7 @@ class Runtime:
                 caller,
                 history=hist,
                 loop_id=task_id,
+                extra_instructions=extra_instructions,
             )
 
         bg_loop = BackgroundAgentLoop(
@@ -569,6 +592,7 @@ class Runtime:
             "user",
             attachments=attachments,
             history=history,
+            extra_instructions=self._extra_instructions,
         ):
             if event.type == "finish":
                 output = event.data.get("output", "")
@@ -594,10 +618,13 @@ class Runtime:
         *,
         attachments: list[Attachment] | None = None,
         history: list[Message] | None = None,
+        extra_instructions: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         from agentouto.streaming import StreamEvent
 
-        system_prompt = self._router.build_system_prompt(agent, caller=caller)
+        system_prompt = self._router.build_system_prompt(
+            agent, caller=caller, extra_instructions=extra_instructions
+        )
         context = Context(system_prompt)
 
         if history:
@@ -744,8 +771,18 @@ class Runtime:
                 )
 
                 sub_result = ""
+                sub_extra = (
+                    self._extra_instructions
+                    if self._extra_instructions_scope == "all"
+                    else None
+                )
                 async for sub_event in self._stream_agent_loop(
-                    target, msg, sub_call_id, caller_call_id, caller_name
+                    target,
+                    msg,
+                    sub_call_id,
+                    caller_call_id,
+                    caller_name,
+                    extra_instructions=sub_extra,
                 ):
                     events.append(sub_event)
                     if sub_event.type == "finish":
@@ -899,9 +936,16 @@ async def async_run(
     attachments: list[Attachment] | None = None,
     history: list[Message] | None = None,
     debug: bool = False,
+    extra_instructions: str | None = None,
+    extra_instructions_scope: Literal["entry", "all"] = "entry",
 ) -> RunResult:
     router = Router(agents, tools, providers)
-    runtime = Runtime(router, debug=debug)
+    runtime = Runtime(
+        router,
+        debug=debug,
+        extra_instructions=extra_instructions,
+        extra_instructions_scope=extra_instructions_scope,
+    )
     return await runtime.execute(
         entry, message, attachments=attachments, history=history
     )
@@ -917,6 +961,8 @@ def run(
     attachments: list[Attachment] | None = None,
     history: list[Message] | None = None,
     debug: bool = False,
+    extra_instructions: str | None = None,
+    extra_instructions_scope: Literal["entry", "all"] = "entry",
 ) -> RunResult:
     return asyncio.run(
         async_run(
@@ -928,6 +974,8 @@ def run(
             attachments=attachments,
             history=history,
             debug=debug,
+            extra_instructions=extra_instructions,
+            extra_instructions_scope=extra_instructions_scope,
         )
     )
 
@@ -1052,9 +1100,15 @@ async def run_background(
     *,
     attachments: list[Attachment] | None = None,
     history: list[Message] | None = None,
+    extra_instructions: str | None = None,
+    extra_instructions_scope: Literal["entry", "all"] = "entry",
 ) -> str:
     router = Router(agents, tools, providers)
-    runtime = Runtime(router)
+    runtime = Runtime(
+        router,
+        extra_instructions=extra_instructions,
+        extra_instructions_scope=extra_instructions_scope,
+    )
     return await runtime._spawn_background_agent(
         entry,
         message,
@@ -1062,6 +1116,7 @@ async def run_background(
         None,
         "user",
         history=history,
+        extra_instructions=extra_instructions,
     )
 
 
@@ -1074,6 +1129,8 @@ def run_background_sync(
     *,
     attachments: list[Attachment] | None = None,
     history: list[Message] | None = None,
+    extra_instructions: str | None = None,
+    extra_instructions_scope: Literal["entry", "all"] = "entry",
 ) -> str:
     return asyncio.run(
         run_background(
@@ -1084,6 +1141,8 @@ def run_background_sync(
             providers,
             attachments=attachments,
             history=history,
+            extra_instructions=extra_instructions,
+            extra_instructions_scope=extra_instructions_scope,
         )
     )
 

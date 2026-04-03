@@ -8,9 +8,9 @@
 
 ## 1. 현재 상태
 
-**버전:** 0.20.4 (공개)
+**버전:** 0.21.0 (공개)
 
-**최종 업데이트:** 백그라운드 실행 및 인터-에이전트 메시징 완료 — AgentLoopRegistry, RegisteredAgentLoop, send_message, get_agent_status, run_background
+**최종 업데이트:** 런타임 extra_instructions 주입 — `run()`, `async_run()`, `run_background()` 등에서 에이전트 스폰/실행 시 시스템 프롬프트에 추가 지시 주입 기능
 
 ---
 
@@ -220,6 +220,16 @@
 - [x] 186개 테스트 통과
 - [x] ai-docs 업데이트 (ARCHITECTURE, MESSAGE_PROTOCOL, ROADMAP)
 
+### Phase 19: 런타임 extra_instructions 주입 ✅
+
+- [x] `Runtime.__init__`에 `extra_instructions` 및 `extra_instructions_scope` 파라미터 추가
+- [x] `Router.build_system_prompt`에 `extra_instructions` 파라미터 추가 — "ADDITIONAL INSTRUCTIONS" 섹션으로 시스템 프롬프트에 주입
+- [x] `run()`, `async_run()`, `run_background()`, `run_background_sync()`에 `extra_instructions` 및 `extra_instructions_scope` 파라미터 추가
+- [x] `extra_instructions_scope="entry"` — 진입 에이전트에만 주입 (기본값)
+- [x] `extra_instructions_scope="all"` — call_agent로 호출되는 모든 하위 에이전트에도 전파
+- [x] 200개 테스트 통과 (14개 신규 테스트)
+- [x] ai-docs 업데이트 (ARCHITECTURE, ROADMAP)
+
 ---
 
 ## 3. 미구현 기능
@@ -247,6 +257,16 @@
 ---
 
 ## 5. 변경 이력
+
+### 0.21.0 (런타임 extra_instructions 주입)
+
+- Phase 19 완료: 런타임 extra_instructions 주입
+- `Runtime.__init__`에 `extra_instructions` 및 `extra_instructions_scope` 파라미터 추가
+- `Router.build_system_prompt`에 `extra_instructions` 파라미터 추가
+- `run()`, `async_run()`, `run_background()`, `run_background_sync()`에 `extra_instructions` 및 `extra_instructions_scope` 파라미터 추가
+- `extra_instructions_scope="entry"` — 진입 에이전트에만 주입 (기본값)
+- `extra_instructions_scope="all"` — call_agent로 호출되는 모든 하위 에이전트에도 전파
+- 200개 테스트 (14개 신규)
 
 ### 0.20.4 (백그라운드 실행 + 인터-에이전트 메시징)
 

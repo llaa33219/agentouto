@@ -209,10 +209,20 @@ class Router:
 
         return schemas
 
-    def build_system_prompt(self, agent: Agent, caller: str | None = None) -> str:
+    def build_system_prompt(
+        self,
+        agent: Agent,
+        caller: str | None = None,
+        extra_instructions: str | None = None,
+    ) -> str:
         other_agents = [a for a in self._agents.values() if a.name != agent.name]
 
         lines = [f'You are "{agent.name}". {agent.instructions}']
+
+        if extra_instructions:
+            lines.append("")
+            lines.append("ADDITIONAL INSTRUCTIONS:")
+            lines.append(extra_instructions)
 
         if caller:
             lines.append("")

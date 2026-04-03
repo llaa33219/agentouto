@@ -37,12 +37,18 @@ async def async_run_stream(
     *,
     attachments: list[Attachment] | None = None,
     history: list[Message] | None = None,
+    extra_instructions: str | None = None,
+    extra_instructions_scope: Literal["entry", "all"] = "entry",
 ) -> AsyncIterator[StreamEvent]:
     from agentouto.router import Router
     from agentouto.runtime import Runtime
 
     router = Router(agents, tools, providers)
-    runtime = Runtime(router)
+    runtime = Runtime(
+        router,
+        extra_instructions=extra_instructions,
+        extra_instructions_scope=extra_instructions_scope,
+    )
     async for event in runtime.execute_stream(
         entry, message, attachments=attachments, history=history
     ):

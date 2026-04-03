@@ -290,7 +290,7 @@ class Router:
     def get_agent(name) -> Agent
     def get_tool(name) -> Tool
     def build_tool_schemas(current_agent) -> list[dict]  # call_agent + finish 포함
-    def build_system_prompt(agent) -> str                 # 에이전트 목록 포함
+    def build_system_prompt(agent, caller=None, extra_instructions=None) -> str  # 에이전트 목록 포함
     def call_llm(agent, context, tool_schemas) -> LLMResponse
 ```
 
@@ -298,6 +298,7 @@ class Router:
 - 에이전트 이름과 instructions 포함
 - 다른 에이전트 목록 포함 (현재 에이전트 제외)
 - `call_agent`/`finish` 사용 안내 포함
+- `extra_instructions` 파라미터가 있으면 "ADDITIONAL INSTRUCTIONS" 섹션으로 시스템 프롬프트에 주입
 
 **도구 스키마 자동 생성:**
 - 사용자 정의 도구 스키마 전체
@@ -398,12 +399,12 @@ async for event in get_stream_events(task_id):
 
 ```python
 class Runtime:
-    def __init__(router, debug=False)
+    def __init__(router, debug=False, extra_instructions=None, extra_instructions_scope="entry")
     async def execute(agent, forward_message, *, attachments=None, history=None) -> RunResult
-    async def _run_agent_loop(agent, forward_message, call_id, parent_call_id, *, attachments=None, history=None) -> str
+    async def _run_agent_loop(agent, forward_message, call_id, parent_call_id, *, attachments=None, history=None, extra_instructions=None) -> str
     async def _execute_tool_call(tc, caller_name, caller_call_id) -> str | ToolResult
     async def execute_stream(agent, forward_message, *, attachments=None, history=None) -> AsyncIterator[StreamEvent]
-    async def _stream_agent_loop(agent, forward_message, call_id, parent_call_id, *, attachments=None, history=None) -> AsyncIterator[StreamEvent]
+    async def _stream_agent_loop(agent, forward_message, call_id, parent_call_id, *, attachments=None, history=None, extra_instructions=None) -> AsyncIterator[StreamEvent]
 ```
 
 **디버그 모드:**
@@ -451,6 +452,8 @@ class Runtime:
 - `attachments` 파라미터는 keyword-only (`*, attachments: list[Attachment] | None = None`)
 - `history` 파라미터는 keyword-only (`*, history: list[Message] | None = None`) — 이전 대화 이력을 전달
 - `debug` 파라미터는 keyword-only (`*, debug: bool = False`)
+- `extra_instructions` 파라미터는 keyword-only — 실행 시 에이전트에 전달할 추가 지시 (시스템 프롬프트에 "ADDITIONAL INSTRUCTIONS"로 주입)
+- `extra_instructions_scope` 파라미터는 keyword-only (`"entry"` | `"all"`) — `"entry"`면 진입 에이전트에만, `"all"`이면 call_agent로 호출되는 모든 하위 에이전트에도 주입
 
 **대화 이력 (history):**
 - `history` 파라미터로 이전 `RunResult.messages`를 전달하면 에이전트가 이전 대화를 참고할 수 있음

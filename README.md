@@ -739,6 +739,7 @@ agentouto/
 | **16** | Conversation history (`history` parameter) | ✅ Done |
 | **17** | Background execution + inter-agent messaging | ✅ Done |
 | **18** | Background streaming + unified API (send_message, get_agent_status, run_background) | ✅ Done |
+| **19** | Runtime extra_instructions injection (extra_instructions + extra_instructions_scope parameters) | ✅ Done |
 
 ---
 
