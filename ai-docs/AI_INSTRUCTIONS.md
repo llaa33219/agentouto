@@ -56,6 +56,7 @@
 | `ARCHITECTURE.md` | 패키지 구조, 모듈 책임, 데이터 흐름 | 구조 변경 시 |
 | `PROVIDER_BACKENDS.md` | 프로바이더 시스템 상세 | 프로바이더 변경 시 |
 | `MESSAGE_PROTOCOL.md` | 메시지 타입, 라우팅, 에이전트 루프 | 프로토콜 변경 시 |
+| `AGENT_LIST_ISOLATION.md` | 에이전트 리스트作用域과 팀 격리 메커니즘 | 격리 패턴 변경 시 |
 | `CONVENTIONS.md` | 코딩 컨벤션, 패턴, 스타일 | 새 패턴 도입 시 |
 | `ROADMAP.md` | 현재 상태, 계획, 알려진 문제 | 매 작업 완료 시 |
 
