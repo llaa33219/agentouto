@@ -252,9 +252,10 @@ agent = Agent(
 | Field | Description | Default |
 |-------|-------------|---------|
 | `name` | Agent name | (required) |
-| `instructions` | Role description | (required) |
+| `instructions` | Detailed instructions (included in agent's system prompt) | (required) |
 | `model` | Model name | (required) |
 | `provider` | Provider name | (required) |
+| `role` | Short role description (shown in agent list) | `None` (uses instructions) |
 | `max_output_tokens` | Max output tokens | `None` (auto) |
 | `reasoning` | Enable reasoning/thinking mode | `False` |
 | `reasoning_effort` | Reasoning intensity | `"medium"` |

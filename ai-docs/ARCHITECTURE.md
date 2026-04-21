@@ -93,9 +93,10 @@ agentouto/
 @dataclass
 class Agent:
     name: str               # 에이전트 이름 (필수)
-    instructions: str       # 역할 설명 (필수)
+    instructions: str       # 상세 지침 (필수, 에이전트의 시스템 프롬프트에 포함)
     model: str              # 모델 이름 (필수)
     provider: str           # 프로바이더 이름 (필수)
+    role: str | None = None # 짧은 역할 설명 (선택, 에이전트 목록에 표시. 없으면 instructions 사용)
     max_output_tokens: int | None  # 최대 출력 토큰 (기본: None → 자동 최대값)
     reasoning: bool         # 추론 모드 토글 (기본: False)
     reasoning_effort: str   # 추론 강도 (기본: "medium")
@@ -297,8 +298,10 @@ class Router:
 ```
 
 **시스템 프롬프트 자동 생성:**
-- 에이전트 이름과 instructions 포함
-- 다른 에이전트 목록 포함 (현재 에이전트 제외)
+- 에이전트 이름과 역할/지침 포함
+- `role`이 있으면 역할로 사용, 없으면 `instructions` 사용 (하위 호환)
+- `role`이 있으면 별도 INSTRUCTIONS 섹션에 상세 지침 포함
+- 다른 에이전트 목록 포함 (현재 에이전트 제외, 역할만 표시)
 - `call_agent`/`finish` 사용 안내 포함
 - `extra_instructions` 파라미터가 있으면 "ADDITIONAL INSTRUCTIONS" 섹션으로 시스템 프롬프트에 주입
 - `caller_loop_id`가 있으면 INVOKED BY 섹션에 caller의 task_id 안내 포함 (에이전트가 `send_message`로 중간 메시지 전송 가능)

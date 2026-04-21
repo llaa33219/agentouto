@@ -10,6 +10,7 @@ class Agent:
     instructions: str
     model: str
     provider: str
+    role: str | None = None
     max_output_tokens: int | None = None
     reasoning: bool = False
     reasoning_effort: str = "medium"

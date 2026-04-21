@@ -246,7 +246,13 @@ class Router:
         )
         other_agents = [a for a in visible_agents.values() if a.name != agent.name]
 
-        lines = [f'You are "{agent.name}". {agent.instructions}']
+        agent_description = agent.role if agent.role is not None else agent.instructions
+        lines = [f'You are "{agent.name}". {agent_description}']
+
+        if agent.role is not None:
+            lines.append("")
+            lines.append("INSTRUCTIONS:")
+            lines.append(agent.instructions)
 
         if extra_instructions:
             lines.append("")
@@ -269,7 +275,8 @@ class Router:
             lines.append("")
             lines.append("Available agents:")
             for a in other_agents:
-                lines.append(f"- {a.name}: {a.instructions}")
+                agent_role = a.role if a.role is not None else a.instructions
+                lines.append(f"- {a.name}: {agent_role}")
 
         lines.append("")
         lines.append("PARALLEL EXECUTION:")
