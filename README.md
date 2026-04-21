@@ -62,23 +62,28 @@ def search_web(query: str) -> str:
     return f"Results for: {query}"
 
 # Agent — model settings live here
+# role: short description shown to other agents in the agent list
+# instructions: detailed instructions included in the agent's own system prompt
 researcher = Agent(
     name="researcher",
-    instructions="Research expert. Search and organize information.",
+    role="Research expert",
+    instructions="Search and organize information from multiple sources. Always verify facts before reporting.",
     model="gpt-5.2",
     provider="openai",
 )
 
 writer = Agent(
     name="writer",
-    instructions="Skilled writer. Turn research into polished reports.",
+    role="Skilled writer",
+    instructions="Turn research findings into polished, well-structured reports. Use clear language and logical flow.",
     model="claude-sonnet-4-6",
     provider="anthropic",
 )
 
 reviewer = Agent(
     name="reviewer",
-    instructions="Critical reviewer. Verify facts and improve quality.",
+    role="Critical reviewer",
+    instructions="Verify facts and improve quality. Check for accuracy, clarity, and completeness in all deliverables.",
     model="gemini-3.1-pro",
     provider="google",
 )
@@ -240,7 +245,8 @@ from agentouto import Agent
 
 agent = Agent(
     name="researcher",
-    instructions="Research expert.",
+    role="Research expert",
+    instructions="Search and organize information from multiple sources. Always verify facts before reporting.",
     model="gpt-5.2",
     provider="openai",
     reasoning=True,
