@@ -18,3 +18,4 @@ env/
 .coverage
 htmlcov/
 *.log
+uv.lock
