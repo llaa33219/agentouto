@@ -16,7 +16,7 @@ from agentouto.exceptions import RoutingError, ToolError
 from agentouto.loop_manager import AgentLoopRegistry, BackgroundAgentLoop
 from agentouto.message import Message
 from agentouto.provider import Provider
-from agentouto.providers import Usage
+from agentouto.providers import LLMResponse, Usage
 from agentouto.router import Router
 from agentouto.summarizer import (
     SummarizeInfo,
