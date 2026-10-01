@@ -231,9 +231,9 @@ class Router:
                 "name": FINISH,
                 "description": (
                     "Return your final result to the caller. "
-                    "This is the ONLY way to deliver your response — "
-                    "plain text is not delivered. "
-                    "Always use this tool when you are done."
+                    "finish(message=...) delivers your result, and so does "
+                    "replying with plain text and no tool calls. "
+                    "Use finish when you want to explicitly conclude."
                 ),
                 "parameters": {
                     "type": "object",
@@ -327,10 +327,9 @@ class Router:
 
         lines.append("")
         lines.append(
-            "IMPORTANT: You MUST call the finish tool to return your final result. "
-            "Plain text responses are NOT delivered to the caller — "
-            'only finish(message="...") will be received. '
-            "Never respond with plain text when you are done."
+            "IMPORTANT: To return your final result, call finish(message=\"...\") "
+            "or reply with plain text and no tool calls — "
+            "both deliver your result to the caller."
         )
         lines.append("Use call_agent to delegate work to other agents.")
 
