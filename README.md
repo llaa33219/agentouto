@@ -122,7 +122,9 @@ print(result.output)
 │  │  │        │                  │          │   │        │
 │  │  │        │             return back ───┐│   │        │
 │  │  │        │                            ││   │        │
-│  │  │        └── finish → Return Message  ││   │        │
+│  │        ├── finish(message=X) ───────┐│   │        │
+│  │        │  or plain text, no tools  ││   │        │
+│  │        │          final answer ───┘│   │        │
 │  │  │                                     ││   │        │
 │  │  └────────────── next iteration ◄──────┘┘   │        │
 │  └─────────────────────────────────────────────┘        │
@@ -132,6 +134,21 @@ print(result.output)
 │                    RunResult.output                     │
 └─────────────────────────────────────────────────────────┘
 ```
+
+### How an Agent Delivers Its Result
+
+An agent finishes by **replying with plain text and no tool calls** — that text becomes the result. Calling `finish(message="...")` does exactly the same thing, so use it when you want the conclusion to be explicit.
+
+```python
+# Both of these end the loop with the same result:
+# 1. the model replies with text and no tool calls
+# 2. the model calls finish(message="Here's the report.")
+```
+
+A few other ways a run can end:
+
+- **The provider stops for good** (token cap, refusal, content filter) — whatever partial text was produced becomes the result.
+- **Empty text with no tool calls** — the agent is still working, so the loop continues.
 
 ### Message Flow — Peer to Peer
 
@@ -398,7 +415,7 @@ result = run(
 
 Override takes precedence over disable — if a tool is both overridden and in `disabled_tools`, the override is used.
 
-**Note:** `finish` cannot be disabled (raises `ValueError`). Override it instead if you need custom finish behavior.
+**Note:** `finish` cannot be disabled (raises `ValueError`). Override it instead if you need custom finish behavior. The override only runs when the model actually calls `finish` — a plain-text reply with no tool calls still ends the run with that text as the result.
 
 ### Multimodal Attachments
 
@@ -956,12 +973,19 @@ agentouto/
 ├── provider.py          # Provider dataclass (API connection info)
 ├── context.py           # Attachment, ContextMessage, per-agent conversation context
 ├── router.py            # Message routing, system prompt generation, tool schema building
-├── runtime.py           # Agent loop engine, parallel execution, run()/async_run()
+├── runtime.py           # Orchestration, parallel execution, run()/async_run()
 ├── loop_manager.py      # Background agent loops, message queues, AgentLoopRegistry
 ├── streaming.py         # async_run_stream(), StreamEvent
 ├── event_log.py         # AgentEvent, EventLog — structured event recording
 ├── tracing.py           # Trace, Span — call tree builder from event logs
 ├── _constants.py        # Shared constants (CALL_AGENT, FINISH)
+├── _bridge/             # coreouto adapter — the only place that imports coreouto
+│   ├── __init__.py      # run_agent_loop() over coreouto.Agent.call()
+│   ├── convert.py       # Type conversion (Context ↔ Message, Attachment ↔ ContentBlock, Usage)
+│   ├── state.py         # RunState + ContextVar
+│   ├── provider.py      # DispatchProvider (coreouto Provider protocol)
+│   ├── tools.py         # Builtin + user tool dispatch into coreouto's tool registry
+│   └── hooks.py         # coreouto hooks → StreamEvent / EventLog / summarizer
 ├── exceptions.py        # ProviderError, AgentError, ToolError, RoutingError, AuthError
 ├── auth/
 │   ├── __init__.py      # AuthMethod ABC, TokenData, TokenStore, OAuth implementations
@@ -1005,6 +1029,10 @@ agentouto/
 | **21** | Built-in tool override/disable (`disabled_tools` parameter) | ✅ Done |
 | **22** | Intermediate messages (`on_message` callback, `user_message` StreamEvent) | ✅ Done |
 | **23** | Background agents disabled by default (`allow_background_agents` parameter) | ✅ Done |
+| **24** | Self-summarization next-step planning (`<summary>` / `<next_steps>`) | ✅ Done |
+| **25** | Summarizer user hook (`on_summarize` callback) | ✅ Done |
+| **26** | API token usage tracking (`RunResult.token_usage`) + hybrid summarization trigger | ✅ Done |
+| **27** | Internal loop rewrite onto `coreouto` (single loop for streaming and non-streaming) | ✅ Done |
 
 ---
 
