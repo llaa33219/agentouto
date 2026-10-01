@@ -463,7 +463,33 @@ class Usage:
 
 ---
 
-## 8. 새 프로바이더 추가 시
+## 8. 종료 사유 추출 (`stop_reason`)
+
+모든 프로바이더 백엔드는 벤더가 알려준 종료 사유를 `LLMResponse.stop_reason`에 담는다. 값은 소문자로 정규화된 문자열이며, 벤더가 알려주지 않은 경우 `None`이다.
+
+```python
+class LLMResponse:
+    content: str | None
+    tool_calls: list[ToolCall]
+    usage: Usage | None = None
+    stop_reason: str | None = None    # 벤더 종료 사유
+    content_without_reasoning -> str | None  # property
+```
+
+| 백엔드 | 소스 | 비고 |
+|--------|------|------|
+| OpenAI Chat Completions (`providers/openai.py`) | `choices[0].finish_reason` | 스트리밍은 마지막 청크의 `chunk.choices[0].finish_reason` |
+| OpenAI Responses (`providers/openai_responses.py`) | `incomplete_details.reason`, 없으면 `response.status` | `incomplete_details`가 있을 때 그 `reason`을 우선 |
+| Anthropic (`providers/anthropic.py`) | `message_delta` 이벤트의 `delta.stop_reason` | 스트리밍 기반이므로 delta에서 누적 |
+| Google Gemini (`providers/google.py`) | `candidate.finish_reason.name` | `FINISH_REASON_UNSPECIFIED`은 `None`으로 정규화 |
+
+**용도:** 에이전트 루프(coreouto)가 이 값을 보고 복구 불가능한 종료(토큰 상한, refusal, 콘텐츠 필터 등)를 판별한다. 이 경우 루프는 남은 부분 텍스트를 결과로 반환하고 종료한다.
+
+**주의:** `stop_reason`은 종료 *사유*일 뿐 종료 *여부*가 아니다. 툴 호출을 포함한 정상 응답에도 `"tool_calls"` 같은 값이 붙는다. 판별은 content와 tool_calls 유무에 더해 coreouto가 관리한다.
+
+---
+
+## 9. 새 프로바이더 추가 시
 
 1. `providers/newkind.py` 생성
 2. `ProviderBackend`를 상속하여 `call()` 구현
@@ -488,10 +514,11 @@ class Usage:
 - [ ] 멀티모달 첨부파일 처리 (`_build_messages`에서 user/tool 메시지의 attachments 변환)
 - [ ] `resolve_api_key()` 사용 (`provider.api_key` 직접 접근 금지)
 - [ ] 토큰 사용량 추출 (`Usage` 객체 생성, `LLMResponse.usage`에 전달)
+- [ ] 종료 사유 추출 (`LLMResponse.stop_reason`에 벤더 값을 전달)
 
 ---
 
-## 8. 알려진 제한사항
+## 10. 알려진 제한사항
 
 1. **Google 전역 설정**: `genai.configure()`가 전역이므로 여러 Google Provider를 동시에 사용하면 충돌 가능.
 2. **스트리밍 부분 지원**: OpenAI (Chat Completions + Responses), Anthropic 백엔드는 네이티브 스트리밍 구현. Google은 fallback (non-streaming 호출 후 단일 이벤트 반환).

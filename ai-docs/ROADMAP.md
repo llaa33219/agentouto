@@ -10,7 +10,7 @@
 
 **버전:** 0.27.0 (공개)
 
-**최종 업데이트:** API 토큰 사용량 추적 + 하이브리드 요약 트리거 (Phase 26)
+**최종 업데이트:** coreouto 루프 통합 + 종료 정책 변경 (Phase 27, 미출시)
 
 ---
 
@@ -129,14 +129,15 @@
 - [x] probe trick 스트리밍 컨텍스트에서도 동작
 - [x] 141개 테스트
 
-### Phase 12: finish() 강제화 ✅
+### Phase 12: finish() 강제화 ✅ (→ Phase 27에서 대체됨)
 
-- [x] 텍스트 전용 응답 시 `finish` 사용 유도 (nudge) — context에 안내 메시지 추가 후 재시도
+- [x] 텍스트 전용 응답 시 `finish` 사용 유도 — context에 안내 메시지 추가 후 재시도
 - [x] 재시도 횟수 제한 없음 — 철학에 따라 시스템 레벨 제한 불허
 - [x] `_run_agent_loop` + `_stream_agent_loop` 모두 적용
 - [x] 시스템 프롬프트에서 finish 사용 강조
-- [x] 경고 로그 출력 (LLM이 finish 사용 안 할 때)
-- [x] 143개 테스트 (스트리밍 nudge 테스트 포함)
+- [x] 143개 테스트
+
+> **Phase 27에서 대체됨.** coreouto 루프 전환으로 텍스트 전용 응답이 그대로 최종 답이 되므로, 강제 유도 장치는 제거되었다. `finish(message=X)`는 그대로 남아 `X`를 결과로 반환하며(내부적으로 텍스트 응답으로 정규화), 시스템 프롬프트는 `finish`와 일반 텍스트 응답이 모두 결과를 전달한다고 안내한다. Phase 3의 `finish` 도구 자체는 유지된다.
 
 ### Phase 14: 에이전트/도구 혼동 에러 핸들링 ✅
 
@@ -332,6 +333,23 @@
 - [x] 229개 테스트 통과
 - [x] ai-docs 업데이트 (ARCHITECTURE, PROVIDER_BACKENDS, ROADMAP)
 
+### Phase 27: coreouto 루프 통합 ✅
+
+- [x] `pyproject.toml`: `coreouto>=0.11.3,<0.12` 의존성 추가 (버전 고정)
+- [x] `agentouto/_bridge/` 패키지 추가 — `coreouto`를 import하는 유일한 곳
+  - [x] `convert.py` — Context ↔ coreouto Message, Attachment ↔ ContentBlock, LLMResponse ↔ coreouto LLMResponse, Usage 변환
+  - [x] `state.py` — `RunState` + `_RUN_STATE` ContextVar (coreouto 레지스트리가 프로세스 전역이므로 실행 단위 상태를 컨텍스트로 전달)
+  - [x] `provider.py` — `DispatchProvider` (coreouto Provider 프로토콜 구현). `router.get_backend` 경유로 테스트 심 유지, `finish` 호출을 텍스트 응답으로 정규화
+  - [x] `tools.py` — builtin + 사용자 도구 디스패치, coreouto 도구 레지스트리 등록, 기존 에러 문자열 보존
+  - [x] `hooks.py` — coreouto 훅 → StreamEvent / EventLog / summarizer 연결
+- [x] `runtime.py`: 턴 루프를 `coreouto.Agent.call()`로 대체 (1584 → 800 LOC)
+- [x] `_stream_agent_loop` 제거 — 스트리밍은 같은 루프에 스트림 콜백이 붙은 경로
+- [x] finish 강제 유도 장치 제거 — 텍스트 전용 응답이 곧 최종 답 (coreouto 컨벤션)
+- [x] `providers/__init__.py`: `LLMResponse.stop_reason` 필드 추가 + 4개 백엔드에서 벤더 종료 사유 전달
+- [x] `router.py`: finish 도구 설명과 시스템 프롬프트 IMPORTANT 블록을 "finish 또는 일반 텍스트 응답 둘 다 결과를 전달"으로 수정
+- [x] 공개 Python API 변경 없음 (엔트리포인트 시그니처, 데이터클래스, 도구 스키마, 출력 포맷 모두 동일)
+- [x] ai-docs 업데이트 (ARCHITECTURE, MESSAGE_PROTOCOL, PROVIDER_BACKENDS, PHILOSOPHY, CONVENTIONS, ROADMAP)
+
 ---
 
 ## 3. 미구현 기능
@@ -359,6 +377,19 @@
 ---
 
 ## 5. 변경 이력
+
+### 미출시 (Phase 27: coreouto 루프 통합)
+
+- Phase 27 완료: `coreouto==0.11.3` 도입 및 에이전트 루프 내부 재작성
+  - `pyproject.toml`: `coreouto>=0.11.3,<0.12` 의존성 추가
+  - `agentouto/_bridge/` 추가 — coreouto 어댑터 (convert / state / provider / tools / hooks)
+  - `runtime.py`: 자체 구현 턴 루프를 `coreouto.Agent.call()`로 대체 (1584 → 800 LOC)
+  - `_stream_agent_loop` 제거 — 스트리밍이 같은 루프의 스트림 콜백 경로로 통합
+  - 텍스트 전용 응답이 곧 최종 답이 되도록 종료 정책 변경 (finish 강제 유도 장치 제거)
+  - `providers/*`: `LLMResponse.stop_reason` 추가 및 벤더 종료 사유 전달
+  - `router.py`: finish 설명과 시스템 프롬프트를 "finish 또는 일반 텍스트 둘 다 전달"으로 수정
+  - 공개 API는 변경 없음
+  - ai-docs 전체 업데이트
 
 ### 0.27.0 (Phase 26: API 토큰 사용량 추적 + 하이브리드 요약 트리거)
 
@@ -492,9 +523,9 @@
 - ai-docs 전체 업데이트
 - README 업데이트
 
-### 0.8.0 (Phase 12: finish() 강제화)
+### 0.8.0 (Phase 12: finish() 강제화) — 이후 Phase 27에서 대체됨
 
-- runtime.py: 텍스트 전용 응답 시 finish nudge 로직 추가 (`_run_agent_loop` + `_stream_agent_loop`)
+- runtime.py: 텍스트 전용 응답 시 finish 유도 로직 추가 (`_run_agent_loop` + `_stream_agent_loop`)
 - 재시도 횟수 제한 없음 — 철학에 따라 시스템 레벨 제한 불허
 - router.py: 시스템 프롬프트에서 finish 사용 강조
 - 에이전트의 일반 메시지 출력과 반환값의 명확한 분리

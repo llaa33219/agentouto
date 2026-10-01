@@ -131,18 +131,18 @@ Available agents:
 
 LLM이 `call_agent(agent_name="...", message="...")`를 호출하면:
 
-1. Runtime이 `self._router.get_agent(agent_name)` 호출
+1. `agentouto/_bridge/tools.py`의 `resolve_agent_target(agent_name)` 호출
 2. Router가 `self._agents` 딕셔너리에서 해당 에이전트를 조회
 3. **존재하지 않으면 `RoutingError` 발생**
 
 ```python
-def _resolve_agent_target(self, agent_name: str) -> Agent:
-    if agent_name not in self._router.agent_names:
-        available = ", ".join(self._router.agent_names) or "(none)"
+def resolve_agent_target(router: Router, agent_name: str) -> Agent:
+    if agent_name not in router.agent_names:
+        available = ", ".join(router.agent_names) or "(none)"
         raise RoutingError(
             f"Unknown agent: '{agent_name}'. Available agents: {available}"
         )
-    return self._router.get_agent(agent_name)
+    return router.get_agent(agent_name)
 ```
 
 ---
