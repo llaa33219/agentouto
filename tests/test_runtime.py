@@ -123,19 +123,18 @@ def upper_tool() -> Tool:
 
 class TestSingleAgentTextResponse:
     @pytest.mark.asyncio
-    async def test_text_response_triggers_nudge_then_finish(
+    async def test_text_response_is_final_answer(
         self,
         agent_a: Agent,
         provider: Provider,
         search_tool: Tool,
     ) -> None:
-        """Text-only response nudges the LLM; finish on retry is accepted."""
-        mock = MockBackend(
-            [
-                _text("Hello from LLM"),
-                _finish("Hello from LLM"),
-            ]
-        )
+        """A text response with no tool calls IS the final answer.
+
+        The loop ends immediately — the text becomes the run output and the
+        provider is called exactly once (no nudge, no retry).
+        """
+        mock = MockBackend([_text("Hello from LLM")])
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 starting_agents=[agent_a],
@@ -144,7 +143,7 @@ class TestSingleAgentTextResponse:
                 providers=[provider],
             )
         assert result.output == "Hello from LLM"
-        assert mock._call_count == 2
+        assert mock._call_count == 1
 
 
 class TestSingleAgentFinish:
@@ -463,96 +462,102 @@ class TestAttachmentsPassthrough:
         assert forward_msgs[0].attachments is None
 
 
-class TestFinishNudge:
+class TestLoopTermination:
     @pytest.mark.asyncio
-    async def test_multiple_nudges_until_finish(
+    async def test_empty_text_response_continues_loop(
         self,
         agent_a: Agent,
         provider: Provider,
         search_tool: Tool,
     ) -> None:
-        """Agent is nudged repeatedly until it uses finish()."""
+        """Empty content with no tool calls means 'still working'.
+
+        The empty response is not deliverable, so the loop continues and the
+        next (non-empty) response terminates the run.
+        """
+        mock = MockBackend([_text(""), _finish("real result")])
+        with patch("agentouto.router.get_backend", return_value=mock):
+            result = await async_run(
+                starting_agents=[agent_a],
+                message="Hello",
+                tools=[search_tool],
+                providers=[provider],
+            )
+        assert result.output == "real result"
+        assert mock._call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_finish_with_other_tool_calls_executes_no_tools(
+        self,
+        agent_a: Agent,
+        provider: Provider,
+        search_tool: Tool,
+    ) -> None:
+        """A finish call in the same batch short-circuits the other calls."""
+        search_calls: list[str] = []
+
+        @Tool
+        def search(query: str) -> str:
+            """Search the web."""
+            search_calls.append(query)
+            return f"Results for: {query}"
+
         mock = MockBackend(
             [
-                _text("thinking..."),
-                _text("still thinking..."),
-                _text("almost done..."),
-                _finish("done"),
+                _multi_tool_calls(
+                    ("finish", "fin_1", {"message": "done"}),
+                    ("search", "tc1", {"query": "should not run"}),
+                )
             ]
         )
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 starting_agents=[agent_a],
                 message="Hello",
-                tools=[search_tool],
+                tools=[search],
                 providers=[provider],
             )
         assert result.output == "done"
-        assert mock._call_count == 4
+        assert mock._call_count == 1
+        assert search_calls == []
 
     @pytest.mark.asyncio
-    async def test_nudge_message_added_to_context(
+    async def test_finish_override_error_returns_error_string(
         self,
         agent_a: Agent,
         provider: Provider,
-        search_tool: Tool,
     ) -> None:
-        """Nudge adds assistant text + user nudge message to context."""
-        from agentouto.runtime import _FINISH_NUDGE
+        """A raising finish override is surfaced as the run output."""
 
-        contexts_seen: list[Context] = []
+        @Tool
+        def finish(message: str) -> str:
+            """Finish that always fails."""
+            raise RuntimeError("boom")
 
-        class CapturingBackend(ProviderBackend):
-            def __init__(self) -> None:
-                self._call_count = 0
-
-            async def call(
-                self,
-                context: Context,
-                tools: list[dict[str, Any]],
-                agent: Agent,
-                provider: Provider,
-            ) -> LLMResponse:
-                contexts_seen.append(context)
-                self._call_count += 1
-                if self._call_count == 1:
-                    return _text("raw text")
-                return _finish("proper result")
-
-        mock = CapturingBackend()
+        mock = MockBackend([_finish("x")])
         with patch("agentouto.router.get_backend", return_value=mock):
             result = await async_run(
                 starting_agents=[agent_a],
-                message="Hello",
-                tools=[search_tool],
+                message="Do work",
+                tools=[finish],
                 providers=[provider],
             )
-        assert result.output == "proper result"
-        second_ctx = contexts_seen[1]
-        msgs = second_ctx.messages
-        assert msgs[-2].role == "assistant"
-        assert msgs[-2].content == "raw text"
-        assert msgs[-1].role == "user"
-        assert _FINISH_NUDGE in (msgs[-1].content or "")
+        assert result.output == "Error in finish override: boom"
+        assert mock._call_count == 1
 
 
 class TestFinishNudgeStreaming:
     @pytest.mark.asyncio
-    async def test_stream_text_response_triggers_nudge_then_finish(
+    async def test_stream_text_response_is_final_answer(
         self,
         agent_a: Agent,
         provider: Provider,
         search_tool: Tool,
     ) -> None:
-        """Streaming: text-only response nudges, finish on retry is accepted."""
+        """Streaming: a text response emits tokens, then one finish event."""
         from agentouto.streaming import StreamEvent, async_run_stream
 
-        mock = MockBackend(
-            [
-                _text("intermediate"),
-                _finish("final result"),
-            ]
-        )
+        mock = MockBackend([_text("final result")])
         with patch("agentouto.router.get_backend", return_value=mock):
             events: list[StreamEvent] = []
             async for event in async_run_stream(
@@ -562,10 +567,12 @@ class TestFinishNudgeStreaming:
                 providers=[provider],
             ):
                 events.append(event)
+        token_events = [e for e in events if e.type == "token"]
+        assert any(e.data["text"] == "final result" for e in token_events)
         finish_events = [e for e in events if e.type == "finish"]
         assert len(finish_events) == 1
         assert finish_events[0].data["output"] == "final result"
-        assert mock._call_count == 2
+        assert mock._call_count == 1
 
 
 class TestMessagesAlwaysPopulated:
