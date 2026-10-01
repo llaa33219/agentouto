@@ -182,6 +182,14 @@ except ModuleNotFoundError:
 
 이 패턴은 `auth/_oauth_common.py`의 `exchange_token()`에서 사용된다.
 
+### 외부 루프 엔진 import 규칙
+
+에이전트 턴 루프 엔진인 `coreouto`는 **`agentouto/_bridge/`에서만 import한다.**
+
+- 다른 모듈에서 `coreouto`를 import하지 않는다. `runtime.py`는 `_bridge.run_agent_loop`만 호출한다.
+- `coreouto`의 이름을 `agentouto`의 공개 API로 재export하지 않는다. 사용자는 계속 `agentouto`에서만 import한다.
+- 업스트림이 alpha이므로 `pyproject.toml`에서 버전을 고정(`>=0.11.3,<0.12`)한다. 이 구간이 바뀌면 `_bridge/` 전체를 재검토한다.
+
 ---
 
 ## 8. 캐싱 패턴
@@ -295,7 +303,7 @@ with patch("agentouto.router.get_backend", return_value=mock):
     result = await async_run(...)
 ```
 
-패치 위치는 `agentouto.router.get_backend` (사용하는 쪽에서 패치).
+패치 위치는 `agentouto.router.get_backend` (사용하는 쪽에서 패치). 루프가 `coreouto.Agent.call()`로 이동해도 이 심은 유지된다 — `_bridge/provider.py`의 `DispatchProvider`가 LLM 호출을 `router.call_llm` / `router.stream_llm`으로 중개하기 때문이다.
 
 ### 헬퍼 함수
 

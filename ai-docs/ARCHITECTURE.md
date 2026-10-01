@@ -32,6 +32,13 @@ agentouto/
 ├── summarizer.py        # 컨텍스트 요약 (토큰 추정, 경계 탐색, 요약 프롬프트 생성)
 ├── tool.py              # Tool 데코레이터/클래스
 ├── tracing.py           # 호출 트레이싱 (Span, Trace)
+├── _bridge/             # coreouto 어댑터 (agentouto에서 coreouto를 import하는 유일한 곳)
+│   ├── __init__.py      # run_agent_loop() — coreouto.Agent.call() 호출, 등록 부트스트랩
+│   ├── convert.py       # 타입 변환 (Context ↔ Message, Attachment ↔ ContentBlock, Usage)
+│   ├── state.py         # RunState + ContextVar (실행 단위 상태 바인딩)
+│   ├── provider.py      # DispatchProvider (coreouto Provider 프로토콜 구현)
+│   ├── tools.py         # builtin + 사용자 도구 디스패치, coreouto 도구 레지스트리 등록
+│   └── hooks.py         # coreouto 훅 → StreamEvent / EventLog / summarizer
 └── providers/
     ├── __init__.py      # ProviderBackend ABC, LLMResponse, get_backend()
     ├── openai.py        # OpenAI Chat Completions 구현 (스트리밍, 안전한 JSON 파싱 포함)
@@ -458,7 +465,6 @@ class Runtime:
     async def _run_agent_loop(agent, forward_message, call_id, parent_call_id, *, attachments=None, history=None, extra_instructions=None, caller_loop_id=None) -> str
     async def _execute_tool_call(tc, caller_name, caller_call_id, *, current_loop_id=None) -> str | ToolResult
     async def execute_stream(agent, forward_message, *, attachments=None, history=None) -> AsyncIterator[StreamEvent]
-    async def _stream_agent_loop(agent, forward_message, call_id, parent_call_id, *, attachments=None, history=None, extra_instructions=None, caller_loop_id=None) -> AsyncIterator[StreamEvent]
     def _accumulate_usage(response: LLMResponse) -> None  # LLM 응답의 토큰 사용량 누적
     def _estimate_current_tokens(context: Context) -> int  # 하이브리드 토큰 추정
 ```
@@ -481,33 +487,32 @@ class Runtime:
 - `_estimate_current_tokens(context)` — 실제 토큰 + 새 메시지 추정으로 정확한 컨텍스트 크기 계산
 
 **에이전트 루프 (`_run_agent_loop`):**
-1. 시스템 프롬프트 생성 → Context 초기화
-2. forward_message를 user 메시지로 추가 (첨부파일이 있으면 함께 추가)
-3. 무한 루프:
-   a. LLM 호출 (이벤트 기록: `llm_call`, `llm_response`)
-   b. tool_calls가 없으면 → finish nudge (context에 [SYSTEM] prefix 포함 안내 추가, 제한 없이 재시도)
-   c. `finish` 호출이 있으면 → message 반환 (이벤트 기록: `finish`)
-   d. tool_calls를 `asyncio.gather`로 병렬 실행 (이벤트 기록: `tool_exec`, `agent_call`)
-   e. 결과를 tool result로 추가 (ToolResult인 경우 첨부파일 포함)
-   f. 다음 반복
+`_run_agent_loop`은 얇은 오케스트레이션만 담당한다. 턴 루프 자체는 `coreouto.Agent.call()`가 실행한다.
+
+1. 시스템 프롬프트 생성 → `RunState` 조립 (forward_message, call_id, history, 첨부파일, event_queue 등)
+2. `Router.build_tool_schemas()`로 도구 스키마 생성 → coreouto 도구 레지스트리에 디스패치 도구 등록
+3. `RunState`를 `_RUN_STATE` ContextVar에 바인딩
+4. `coreouto.Agent(config).call(history=...)` 호출 → 최종 응답 문자열 반환
+5. ContextVar 언바인딩 (`finally`)
 
 **도구 실행 (`_execute_tool_call`):**
-- `call_agent` → `_resolve_agent_target()`으로 대상 검증 후 `_run_agent_loop` 재귀 호출 (sub_call_id 생성, Message 추적)
-- 일반 도구 → `_resolve_tool_target()`으로 도구 검증 후 `tool.execute(**kwargs)` 실행 → `str | ToolResult` 반환, 에러 시 `ToolError` 래핑
-- `ToolResult` 반환 시 `content`와 `attachments`를 분리하여 context에 추가
+- `call_agent` → `_bridge/tools.py`의 `resolve_agent_target()`으로 대상 검증 후 `_run_agent_loop` 재귀 호출 (sub_call_id 생성, Message 추적)
+- 일반 도구 → `resolve_tool_target()`으로 도구 검증 후 `tool.execute(**kwargs)` 실행 → `str | ToolResult` 반환, 에러 시 `ToolError` 래핑
+- `ToolResult` 반환 시 `content`와 `attachments`를 분리하여 coreouto `ToolResult`로 변환
 
-**에이전트/도구 혼동 감지 (`_resolve_agent_target` / `_resolve_tool_target`):**
+**에이전트/도구 혼동 감지 (`_bridge/tools.py`의 `resolve_agent_target` / `resolve_tool_target`):**
 - LLM이 도구 이름을 에이전트로 호출 시 → 도구임을 알려주는 에러 메시지 반환
 - LLM이 에이전트 이름을 도구로 호출 시 → `call_agent` 사용을 안내하는 에러 메시지 반환
 - 존재하지 않는 이름 호출 시 → 사용 가능한 에이전트/도구 목록 포함 에러 메시지 반환
 - 에러는 크래시 대신 도구 결과로 LLM에 전달되어 자기 수정 가능
 
-**스트리밍 (`execute_stream` / `_stream_agent_loop`):**
-- `Router.stream_llm()`을 통해 LLM 스트리밍 호출
-- 텍스트 청크는 `StreamEvent(type="token")`로 즉시 yield
-- 도구 호출, 에이전트 호출, 완료도 각각 StreamEvent로 yield
+**스트리밍 (`execute_stream`):**
+스트리밍은 별도 루프가 아니다. 동일한 `run_agent_loop`을 스트림 콜백이 붙은 상태로 실행한다.
+
+- `RunState.stream=True`로 바인딩하면 `_bridge.provider.DispatchProvider`가 `router.stream_llm()`을 사용하고, 텍스트 청크를 coreouto의 `ON_STREAM_TEXT` 훅 → `StreamEvent(type="token")` 경로로 흘려보낸다
+- `tool_call`, `tool_result`, `agent_call`, `agent_return`, `finish`, `error` 이벤트도 `_bridge/hooks.py`의 훅에서 생성된다
 - 내부 에이전트 호출은 재귀적으로 sub-stream 생성
-- 도구/에이전트 해석 및 실행 에러는 try/except로 잡아 도구 결과로 전환 (크래시 방지)
+- 도구/에이전트 해석 및 실행 에러는 `execute_dispatch`에서 도구 결과 문자열로 전환 (크래시 방지)
 
 **`run()` / `async_run()`:**
 - Router 생성 → Runtime 생성 → execute 호출 → RunResult 반환
@@ -549,6 +554,43 @@ FINISH = "finish"
 ```
 
 매직 스트링 방지용. `router.py`와 `runtime.py`에서 공유.
+
+### `_bridge/` — coreouto 어댑터
+
+`coreouto==0.11.3`이 에이전트 턴 루프 엔진이다. `agentouto/_bridge/`는 **coreouto를 import하는 유일한 패키지**다 (다른 모듈은 `runtime.py`가 `run_agent_loop`를 호출할 뿐). 공개 API는 그대로 agentouto 것만 노출한다.
+
+| 모듈 | 책임 |
+|------|------|
+| `__init__.py` | `run_agent_loop(state)` — `coreouto.Agent(config).call()` 호출. builtin 도구/훅 등록 부트스트랩 |
+| `convert.py` | 타입 변환: `Context` ↔ coreouto `Message`, `Attachment` ↔ coreouto `ContentBlock`, agentouto `LLMResponse` ↔ coreouto `LLMResponse`, `Usage` ↔ coreouto `Usage`, `ToolResult` ↔ coreouto `ToolResult` |
+| `state.py` | `RunState` 데이터클래스 + `_RUN_STATE` ContextVar |
+| `provider.py` | `DispatchProvider` — coreouto `Provider` 프로토콜 구현 |
+| `tools.py` | builtin + 사용자 도구 디스패치, coreouto 도구 레지스트리 등록 |
+| `hooks.py` | coreouto 훅 → `StreamEvent` / `EventLog` / summarizer |
+
+**왜 ContextVar인가 (`state.py`):** coreouto의 도구/훅/프로바이더 레지스트리는 프로세스 전역이다. 그래서 실행 단위 상태를 인스턴스로 들고 다닐 수 없고, 모든 디스패치 진입점(도구 핸들러, 훅, provider shim)이 `_RUN_STATE` ContextVar로 현재 실행을 조회한다. `asyncio`는 컨텍스트를 `asyncio.gather` 자식, 중첩 에이전트 루프, `asyncio.to_thread`까지 전파하므로 컨텍스트 전파가 그대로 재사용된다. `require_run_state()`가 컨텍스트가 없으면 명시적으로 실패한다.
+
+**`provider.py` — `DispatchProvider`:**
+- agentouto의 프로바이더 백엔드가 와이어 포맷을 소유한다 (멀티모달 도구 결과, JSON 인자 복구). coreouto의 기본 프로바이더는 멀티모달 도구 결과와 JSON 인자 복구에서 후퇴하므로, 이 shim은 변환만 하고 LLM 호출은 `router.call_llm` / `router.stream_llm`로 중개한다. 덕분에 테스트의 `patch("agentouto.router.get_backend")` 심이 그대로 유지된다.
+- `finish` 도구 호출이 있으면 응답을 텍스트 응답으로 정규화한다 (`tool_calls=[]`, `content=resolve_finish_result(...)`). 동시 호출된 형제 도구 호출은 의도적으로 버린다 — 이전 루프도 `finish`를 보자마자 반환했기 때문이다.
+- `_stream` 속성을 가진 인스턴스 하나로 동시 실행을 모두 처리한다. 스트림 여부는 `RunState.stream`으로 판단한다.
+
+**`tools.py`:**
+- coreouto에는 "이미 만들어진 Tool 등록" API가 없다(데코레이터 형태만 있고 `Any` 파라미터를 거부한다). agentouto 디스패치 핸들러는 임의 인자를 받고 스키마는 `Router.build_tool_schemas`가 제공하므로, 고정된 0.11.x 레지스트리 dict에 직접 등록한다.
+- 에이전트 이름도 도구로 등록한다 — 에이전트를 도구로 부르는 것은 라우팅 가능한 실수이며, agentouto 자체의 에러 메시지를 내야 하기 때문이다.
+- `execute_dispatch()`는 절대 raise하지 않고 항상 텍스트를 반환한다. 이렇게 해야 coreouto의 예외 삼킴이 개입하지 않아 agentouto의 정확한 에러 문자열이 모델까지 전달된다 (에러 → 도구 결과 원칙 유지).
+
+**`hooks.py`:**
+- `BEFORE_LLM_CALL` — 주입 메시지 반영(`send_message`, `on_message`) + 자가 요약 + `llm_call` 이벤트 기록
+- `AFTER_LLM_CALL` — `llm_response` 이벤트 기록, 토큰 사용량 누적, 하이브리드 추정용 `_last_input_tokens` 갱신
+- `BEFORE_TOOL_CALL` / `AFTER_TOOL_CALL` — `tool_call` / `tool_result` 스트림 이벤트. 레지스트리에 없는 도구 이름은 coreouto의 `"tool not found: X"`를 agentouto 문구로 재작성한다.
+- `ON_FINISH` — `finish` 스트림 이벤트 + 이벤트 로그 기록
+- `ON_STREAM_TEXT` → `token` 이벤트, `ON_STREAM_THINKING` → 버림 (agentouto에 thinking 이벤트가 없음)
+- 훅 레지스트리도 전역이므로 프로세스당 1회만 등록하고, 각 훅은 agentouto가 호출자가 아닐 때 no-op 한다.
+
+**단일 루프 설계:** 이전에는 `_run_agent_loop`와 `_stream_agent_loop`이 같은 로직을 중복 구현했다(스트리밍 쪽만 `stream_llm`을 쓰고 종료 처리를 따로 반복). 이제 루프는 하나뿐이고, 스트리밍은 같은 루프에 스트림 콜백이 붙은 상태다.
+
+**에이전트 백엔드를 여전히 유지하는 이유:** coreouto가 제공하는 stock provider 대신 agentouto의 백엔드를 `DispatchProvider`로 중개한다. 멀티모달 도구 결과 전달과 손상된 JSON 인자 복구에서 자체 백엔드가 더 정확하기 때문이다. 종료 판단에 필요한 벤더 종료 사유는 `LLMResponse.stop_reason`으로 전달된다.
 
 ### `exceptions.py`
 
@@ -680,6 +722,7 @@ class LLMResponse:
     content: str | None
     tool_calls: list[ToolCall]
     usage: Usage | None                    # API 토큰 사용량 (선택적)
+    stop_reason: str | None = None         # 벤더 종료 사유 (상세: PROVIDER_BACKENDS.md)
     content_without_reasoning -> str | None  # property: 추론 태그 제외 content
 
 class ProviderBackend(ABC):
@@ -720,28 +763,40 @@ run(message, starting_agents, tools, providers, ...)
         │
         └── _run_agent_loop(entry, message)
               │
-              ├── router.build_system_prompt(agent)  ← 시스템 프롬프트 생성
-              ├── Context(system_prompt)              ← 컨텍스트 초기화
-              ├── context.add_user(message, attachments)  ← 전달 메시지 + 첨부파일 추가
+              ├── router.build_system_prompt(agent)   ← 시스템 프롬프트 생성
+              ├── RunState 조립 (message, history, attachments, event_queue)
               ├── router.build_tool_schemas(agent.name) ← 도구 스키마 생성
+              ├── bind_run_state(state)                 ← ContextVar 바인딩
               │
-              └── while True:
-                    ├── router.call_llm(agent, context, schemas)
-                    │     ├── provider = providers[agent.provider]
-                    │     ├── backend = get_backend(provider.kind)
-                    │     └── backend.call(context, schemas, agent, provider)
-                    │           └── LLMResponse(content, tool_calls)
+              └── coreouto.Agent(config).call(history=...)
                     │
-                    ├── no tool_calls? → finish nudge ([SYSTEM] prefix 포함, 제한 없이 재시도)
-                    ├── finish found? → return finish.message
-                    │
-                    ├── context.add_assistant_tool_calls(tool_calls)
-                    ├── asyncio.gather(*[_execute_tool_call(tc) for tc in tool_calls])
-                    │     ├── call_agent → _run_agent_loop(target, msg)  [재귀]
-                    │     └── tool → tool.execute(**kwargs)
-                    │
-                    └── context.add_tool_result(id, name, result_or_error, attachments)
+                    └── (coreouto 턴 루프)
+                          ├── BEFORE_LLM_CALL 훅 → 주입 메시지 반영, 자가 요약
+                          ├── DispatchProvider.create()
+                          │     ├── Context 재구성 (convert.py)
+                          │     ├── router.call_llm / stream_llm
+                          │     │     ├── provider = providers[agent.provider]
+                          │     │     ├── backend = get_backend(provider.kind)
+                          │     │     └── backend.call(context, schemas, agent, provider)
+                          │     │           └── LLMResponse(content, tool_calls, usage, stop_reason)
+                          │     └── finish 도구 호출 → 텍스트 응답으로 정규화
+                          ├── tool_calls 있음 → coreouto 도구 레지스트리 디스패치
+                          │     ├── call_agent → _run_agent_loop(target, msg)  [재귀]
+                          │     └── tool → tool.execute(**kwargs)
+                          └── 루프 종료 → 응답 텍스트 반환
 ```
+
+### 루프 종료 조건
+
+에이전트 루프는 다음 중 하나에서 종료한다:
+
+1. **텍스트 응답 + 도구 호출 없음** → 해당 텍스트가 최종 답 (coreouto 컨벤션). `finish()`를 강제하지 않는다.
+2. **`finish(message=X)` 호출** → `X`가 최종 답. 브릿지의 provider shim이 이를 텍스트 응답으로 정규화하므로 1번과 동일한 경로다.
+3. **복구 불가능한 프로바이더 종료** (토큰 상한, refusal, 콘텐츠 필터 등) → 부분 텍스트가 있으면 그것이 결과.
+4. **빈 content + 도구 호출 없음** → 아직 작업 중이므로 루프를 계속한다.
+5. **스트리밍 백엔드가 최종 `LLMResponse`를 내지 않음** → `NoLLMResponseError` → `StreamEvent(type="error")` 후 빈 문자열 반환.
+
+`max_iterations`는 설정하지 않는다 (`None`) — 철학상 시스템 레벨 반복 제한이 없다.
 
 ### 프로바이더 백엔드 데이터 변환
 
@@ -764,9 +819,12 @@ Context (프로바이더 비의존)
 
 | 패키지 | 버전 | 용도 |
 |--------|------|------|
+| `coreouto` | ≥0.11.3, <0.12 | 에이전트 턴 루프 엔진. `agentouto/_bridge/`에서만 import |
 | `openai` | ≥1.50.0 | OpenAI 및 호환 API 클라이언트 |
 | `anthropic` | ≥0.34.0 | Anthropic API 클라이언트 |
 | `google-generativeai` | ≥0.8.0 | Google Gemini API 클라이언트 |
+
+`coreouto`는 alpha 단계의 업스트림이므로 버전을 고정(pin)한다. `agentouto/_bridge/`는 coreouto를 감싸는 어댑터일 뿐이며, coreouto의 이름을 재export하지 않는다. 사용자는 계속 `agentouto`에서만 import한다.
 
 ### 선택적 의존성 (`[oauth]`)
 
@@ -823,7 +881,7 @@ OAuth 기능 설치: `pip install agentouto[oauth]`
 
 ### 패턴 4: 에러 → 도구 결과
 
-`asyncio.gather(return_exceptions=True)`로 에러를 도구 결과에 포함시켜 LLM에게 전달한다. 런타임이 크래시하지 않고 LLM이 에러를 보고 판단한다.
+도구 실행 에러를 예외로 전파하지 않고 에러 문자열을 도구 결과로 만들어 LLM에게 전달한다. 런타임이 크래시하지 않고 LLM이 에러를 보고 판단한다. 병렬 도구 실행과 예외 수집은 coreouto 루프가 담당하고, agentouto는 `_bridge/tools.py:execute_dispatch()`에서 예외를 문자열로 바꿔 반환한다.
 
 ### 패턴 5: 토큰 로테이션 캐싱
 

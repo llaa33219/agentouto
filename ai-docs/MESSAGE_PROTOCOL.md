@@ -105,7 +105,7 @@ LLM에게 제공되는 `finish` 도구:
 ```json
 {
   "name": "finish",
-  "description": "Return your final result to the caller. This is the ONLY way to deliver your response — plain text is not delivered. Always use this tool when you are done.",
+  "description": "Return your final result to the caller. finish(message=...) delivers your result, and so does replying with plain text and no tool calls. Use finish when you want to explicitly conclude.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -119,19 +119,15 @@ LLM에게 제공되는 `finish` 도구:
 ### 동작
 
 1. LLM이 `finish(message="최종 결과: ...")` 호출
-2. Runtime이 `_find_finish`로 감지
-3. `finish.arguments["message"]`를 반환값으로 사용
+2. `_bridge/provider.py`의 `DispatchProvider`가 `finish` 호출을 감지
+3. `finish.arguments["message"]`를 최종 응답 텍스트로 사용 (동시에 호출된 형제 도구 호출은 버려짐)
 4. 에이전트 루프 종료
 
-### finish 강제 (Finish Nudge)
+`finish`는 **선택적**이다. 도구 호출 없이 텍스트만 응답하면 그 텍스트가 그대로 최종 답이 되고 루프가 종료된다. 브릿지는 `finish(message=X)`를 "content=X, tool_calls=[]"인 텍스트 응답으로 정규화하므로, `finish`를 쓴 경우와 안 쓴 경우가 내부적으로 동일한 경로다. 명시적으로 마무리하고 싶을 때 `finish`를 쓰면 된다.
 
-LLM이 `finish`를 호출하지 않고 도구 호출 없이 텍스트만 응답한 경우:
-- 해당 텍스트를 context에 assistant 메시지로 추가
-- "plain text는 전달되지 않았다, finish를 사용하라"는 안내를 user 메시지로 추가
-- 루프를 재시도하여 LLM이 `finish()`를 호출할 때까지 계속 유도
-- 재시도 횟수 제한 없음 — 철학에 따라 시스템 레벨 제한을 두지 않음
+`RunResult.output`은 위 두 경우 모두에서 "에이전트가 마지막에 낸 텍스트"다.
 
-이 메커니즘은 에이전트의 **일반 메시지 출력**과 **명시적 반환값**을 명확히 분리한다. `RunResult.output`은 항상 `finish(message=...)` 로 명시적으로 결정된 값이다.
+> 과거에는 텍스트 전용 응답을 버리고 `finish`만 반복해서 유도하는 장치가 있었으나, coreouto 루프로 전환하면서 제거되었다. 이제 모델이 자연스럽게 답을 끝내는 경로 하나만 유지된다.
 
 ---
 
@@ -141,28 +137,33 @@ LLM이 `finish`를 호출하지 않고 도구 호출 없이 텍스트만 응답�
 [에이전트 호출됨 — forward message 수신]
          │
          ▼
-    ┌─→ LLM 호출 (router.call_llm)
+    ┌─→ LLM 호출 (router.call_llm / stream_llm)
     │      │
     │      ▼
     │   LLM 응답 분석
     │      │
-    │      ├── tool_calls 없음     → finish nudge (제한 없이 재시도)
-    │      ├── finish 포함          → finish.message 반환 → 루프 종료
-    │      └── tool_calls 있음     → asyncio.gather로 병렬 실행
+    │      ├── tool_calls 없음 + 텍스트 있음 → 그 텍스트가 최종 답 → 루프 종료
+    │      ├── tool_calls 없음 + 빈 content  → 아직 작업 중 → 계속
+    │      ├── finish 포함                 → finish.message 반환 → 루프 종료
+    │      ├── 복구 불가 프로바이더 종료      → 부분 텍스트 반환 → 루프 종료
+    │      └── tool_calls 있음             → 병렬 실행 (coreouto 루프)
     │                                    │
     │                                    ├── call_agent → 재귀 호출
     │                                    └── 일반 도구 → tool.execute()
     │                                    │
-    │                              결과를 context에 추가
+    │                              결과를 컨텍스트에 추가
     │                                    │
     └────────────────────────────────────┘
 ```
 
+턴 루프 자체는 `coreouto.Agent.call()`이 실행한다 (`agentouto/_bridge/`).
+
 ### 루프 종료 조건
 
-1. `finish` 도구 호출 → 명시적 종료 (**유일한 종료 경로**)
-2. 텍스트 전용 응답 → finish nudge 재시도 (제한 없음)
-   - Nudge 메시지는 `[SYSTEM]` prefix가 포함되어 LLM이 시스템 메시지임을 인식할 수 있음
+1. **텍스트 응답 + 도구 호출 없음** → 해당 텍스트가 최종 답. `finish()`를 강제하지 않는다 (coreouto 컨벤션).
+2. **`finish(message=X)` 도구 호출** → `X`가 최종 답. 내부적으로 1번과 동일한 텍스트 응답으로 정규화된다.
+3. **복구 불가능한 프로바이더 종료** (토큰 상한, refusal, 콘텐츠 필터 등 — `LLMResponse.stop_reason`으로 분류) → 부분 텍스트가 있으면 그것이 결과.
+4. 반복 횟수 제한은 두지 않는다 (`max_iterations=None`) — 철학상 시스템 레벨 제한이 없다.
 
 ### 루프 내 상태
 
@@ -243,7 +244,7 @@ COLLABORATION GUIDELINES:
 - 결과가 개선되면 다른 에이전트에게 작업을 위임하세요
 - 건설적인 피드백을 제공하여 다른 에이전트의 작업을 도와주세요
 
-IMPORTANT: You MUST call the finish tool to return your final result. Plain text responses are NOT delivered to the caller — only finish(message="...") will be received. Never respond with plain text when you are done.
+IMPORTANT: To return your final result, call finish(message="...") or reply with plain text and no tool calls — both deliver your result to the caller.
 Use call_agent to delegate work to other agents.
 ```
 
@@ -254,7 +255,7 @@ Use call_agent to delegate work to other agents.
 3. 다른 에이전트 목록 (현재 에이전트 제외) — 이름과 instructions
 4. 병렬 실행 가이드
 5. 협업 가이드라인
-6. finish 메커니즘 안내 (plain text 비전달 설명)
+6. 결과 전달 방법 안내 (`finish` 또는 도구 호출 없는 텍스트 응답 — 둘 다 전달됨)
 7. call_agent 사용 안내
 
 ### 제외되는 정보
