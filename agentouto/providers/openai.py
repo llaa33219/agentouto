@@ -12,7 +12,7 @@ from agentouto.context import Attachment, Context, ToolCall
 from agentouto.exceptions import ProviderError
 from agentouto.model_metadata import resolve_max_output_tokens
 from agentouto.provider import Provider
-from agentouto.providers import LLMResponse, ProviderBackend, Usage
+from agentouto.providers import LLMResponse, ProviderBackend, Usage, _normalize_stop_reason
 
 logger = logging.getLogger("agentouto")
 
@@ -87,7 +87,12 @@ class OpenAIBackend(ProviderBackend):
                 output_tokens=response.usage.completion_tokens,
             )
 
-        return LLMResponse(content=msg.content, tool_calls=parsed_calls, usage=usage)
+        return LLMResponse(
+            content=msg.content,
+            tool_calls=parsed_calls,
+            usage=usage,
+            stop_reason=_normalize_stop_reason(response.choices[0].finish_reason),
+        )
 
     async def stream(
         self,
@@ -129,11 +134,15 @@ class OpenAIBackend(ProviderBackend):
         accumulated_content = ""
         accumulated_tool_calls: dict[int, dict[str, str]] = {}
         accumulated_usage: Usage | None = None
+        stop_reason: str | None = None
 
         async for chunk in response_stream:
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
+
+            if chunk.choices[0].finish_reason is not None:
+                stop_reason = _normalize_stop_reason(chunk.choices[0].finish_reason)
 
             if delta.content:
                 accumulated_content += delta.content
@@ -175,7 +184,12 @@ class OpenAIBackend(ProviderBackend):
                 )
             )
 
-        yield LLMResponse(content=accumulated_content or None, tool_calls=parsed_calls, usage=accumulated_usage)
+        yield LLMResponse(
+            content=accumulated_content or None,
+            tool_calls=parsed_calls,
+            usage=accumulated_usage,
+            stop_reason=stop_reason,
+        )
 
 
 def _build_attachment_parts(attachments: list[Attachment]) -> list[dict[str, Any]]:

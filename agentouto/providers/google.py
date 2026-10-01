@@ -11,7 +11,7 @@ from agentouto.context import Attachment, Context, ToolCall
 from agentouto.exceptions import ProviderError
 from agentouto.model_metadata import resolve_max_output_tokens
 from agentouto.provider import Provider
-from agentouto.providers import LLMResponse, ProviderBackend, Usage
+from agentouto.providers import LLMResponse, ProviderBackend, Usage, _normalize_stop_reason
 
 _JSON_TYPE_MAP: dict[str, int] = {
     "string": 1,
@@ -77,10 +77,12 @@ class GoogleBackend(ProviderBackend):
         if not response.candidates:
             raise ProviderError(provider.name, "Empty response: no candidates returned")
 
+        candidate = response.candidates[0]
+
         content_text: str | None = None
         parsed_calls: list[ToolCall] = []
 
-        for part in response.candidates[0].content.parts:
+        for part in candidate.content.parts:
             fn = part.function_call
             if fn and fn.name:
                 parsed_calls.append(
@@ -100,7 +102,16 @@ class GoogleBackend(ProviderBackend):
                 output_tokens=response.usage_metadata.candidates_token_count,
             )
 
-        return LLMResponse(content=content_text, tool_calls=parsed_calls, usage=usage)
+        stop_reason = _normalize_stop_reason(candidate.finish_reason)
+        if stop_reason == "finish_reason_unspecified":
+            stop_reason = None
+
+        return LLMResponse(
+            content=content_text,
+            tool_calls=parsed_calls,
+            usage=usage,
+            stop_reason=stop_reason,
+        )
 
 
 def _build_attachment_parts(attachments: list[Attachment]) -> list[Any]:

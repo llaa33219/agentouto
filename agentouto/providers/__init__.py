@@ -18,6 +18,21 @@ _REASONING_TAG_RE = re.compile(
 )
 
 
+def _normalize_stop_reason(value: object) -> str | None:
+    """Normalize a vendor terminal status to a lowercase string.
+
+    Returns ``None`` when the vendor exposes no status.  Vendor enums carry
+    their symbolic name in ``.name`` (Google's ``FinishReason.STOP`` stringifies
+    to ``"1"``), so ``.name`` is preferred over ``str(value)``.
+    """
+    if value is None:
+        return None
+    raw = getattr(value, "name", None) or value
+    if not isinstance(raw, str):
+        return None
+    return raw.strip().lower() or None
+
+
 def _content_outside_reasoning(content: str) -> str:
     """Return *content* with all reasoning-tag blocks removed.
 
@@ -53,17 +68,19 @@ class Usage:
 
 
 class LLMResponse:
-    __slots__ = ("content", "tool_calls", "usage")
+    __slots__ = ("content", "stop_reason", "tool_calls", "usage")
 
     def __init__(
         self,
         content: str | None = None,
         tool_calls: list[ToolCall] | None = None,
         usage: Usage | None = None,
+        stop_reason: str | None = None,
     ) -> None:
         self.content = content
         self.tool_calls = tool_calls or []
         self.usage = usage
+        self.stop_reason = stop_reason
 
     @property
     def content_without_reasoning(self) -> str | None:

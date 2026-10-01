@@ -12,7 +12,7 @@ from agentouto.context import Attachment, Context, ToolCall
 from agentouto.exceptions import ProviderError
 from agentouto.model_metadata import resolve_max_output_tokens
 from agentouto.provider import Provider
-from agentouto.providers import LLMResponse, ProviderBackend, Usage
+from agentouto.providers import LLMResponse, ProviderBackend, Usage, _normalize_stop_reason
 from agentouto.providers.openai import _parse_tool_arguments
 
 logger = logging.getLogger("agentouto")
@@ -108,6 +108,7 @@ class OpenAIResponsesBackend(ProviderBackend):
         accumulated_text = ""
         tool_calls_buffer: dict[int, dict[str, str]] = {}
         usage: Usage | None = None
+        stop_reason: str | None = None
 
         async for event in response_stream:
             event_type = getattr(event, "type", "")
@@ -135,11 +136,13 @@ class OpenAIResponsesBackend(ProviderBackend):
                     tool_calls_buffer[idx]["arguments"] += delta
 
             elif event_type == "response.done":
-                if event.response and getattr(event.response, "usage", None):
-                    usage = Usage(
-                        input_tokens=getattr(event.response.usage, "input_tokens", 0) or 0,
-                        output_tokens=getattr(event.response.usage, "output_tokens", 0) or 0,
-                    )
+                if event.response:
+                    if getattr(event.response, "usage", None):
+                        usage = Usage(
+                            input_tokens=getattr(event.response.usage, "input_tokens", 0) or 0,
+                            output_tokens=getattr(event.response.usage, "output_tokens", 0) or 0,
+                        )
+                    stop_reason = _stop_reason(event.response)
 
         parsed_calls: list[ToolCall] = []
         for idx in sorted(tool_calls_buffer):
@@ -152,7 +155,12 @@ class OpenAIResponsesBackend(ProviderBackend):
                 )
             )
 
-        yield LLMResponse(content=accumulated_text or None, tool_calls=parsed_calls, usage=usage)
+        yield LLMResponse(
+            content=accumulated_text or None,
+            tool_calls=parsed_calls,
+            usage=usage,
+            stop_reason=stop_reason,
+        )
 
 
 def _build_attachment_parts(attachments: list[Attachment]) -> list[dict[str, Any]]:
@@ -246,4 +254,16 @@ def _parse_response(response: Any) -> LLMResponse:
             output_tokens=getattr(response.usage, "output_tokens", 0) or 0,
         )
 
-    return LLMResponse(content=content, tool_calls=tool_calls, usage=usage)
+    return LLMResponse(
+        content=content,
+        tool_calls=tool_calls,
+        usage=usage,
+        stop_reason=_stop_reason(response),
+    )
+
+
+def _stop_reason(response: Any) -> str | None:
+    """Most specific terminal status: ``incomplete_details.reason`` over ``status``."""
+    incomplete = getattr(response, "incomplete_details", None)
+    reason = _normalize_stop_reason(getattr(incomplete, "reason", None))
+    return reason or _normalize_stop_reason(getattr(response, "status", None))

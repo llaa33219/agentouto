@@ -12,7 +12,7 @@ from agentouto.context import Attachment, Context, ToolCall
 from agentouto.exceptions import ProviderError
 from agentouto.model_metadata import resolve_max_output_tokens
 from agentouto.provider import Provider
-from agentouto.providers import LLMResponse, ProviderBackend, Usage
+from agentouto.providers import LLMResponse, ProviderBackend, Usage, _normalize_stop_reason
 
 logger = logging.getLogger("agentouto")
 
@@ -101,6 +101,7 @@ class AnthropicBackend(ProviderBackend):
         tool_blocks: dict[int, dict[str, Any]] = {}
         input_tokens = 0
         output_tokens = 0
+        stop_reason: str | None = None
 
         async for event in response_stream:
             if event.type == "content_block_start":
@@ -121,6 +122,8 @@ class AnthropicBackend(ProviderBackend):
                 if event.message.usage:
                     input_tokens = event.message.usage.input_tokens or 0
             elif event.type == "message_delta":
+                if event.delta.stop_reason is not None:
+                    stop_reason = _normalize_stop_reason(event.delta.stop_reason)
                 if event.usage:
                     output_tokens = event.usage.output_tokens or 0
 
@@ -141,7 +144,10 @@ class AnthropicBackend(ProviderBackend):
 
         usage = Usage(input_tokens=input_tokens, output_tokens=output_tokens) if input_tokens or output_tokens else None
         yield LLMResponse(
-            content=accumulated_content or None, tool_calls=parsed_calls, usage=usage,
+            content=accumulated_content or None,
+            tool_calls=parsed_calls,
+            usage=usage,
+            stop_reason=stop_reason,
         )
 
 
